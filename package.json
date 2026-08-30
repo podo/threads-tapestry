@@ -1,0 +1,11 @@
+{
+  "name": "threads-tapestry",
+  "version": "0.3.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node tests/plugin.test.js && node tests/home.test.js && node tests/web.test.js && node tests/worker.test.mjs",
+    "build": "bash scripts/build.sh",
+    "test:e2e": "npm run build && node tests/web-package-e2e.test.js"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "inputs": [
+    {
+      "name": "mobile_token",
+      "type": "text",
+      "prompt": "Threads mobile token (IGT:2:…)",
+      "placeholder": "Paste the token produced by the local helper"
+    },
+    {
+      "name": "device_id",
+      "type": "text",
+      "prompt": "Device ID",
+      "placeholder": "android-xxxxxxxxxxxxx"
+    },
+    {
+      "name": "account_handle",
+      "type": "text",
+      "prompt": "Your Threads handle (optional)",
+      "placeholder": "@yourname"
+    },
+    {
+      "name": "feed_kind",
+      "type": "choices",
+      "prompt": "Feed",
+      "choices": "for_you,following",
+      "value": "for_you"
+    },
+    {
+      "name": "include_reposts",
+      "type": "switch",
+      "prompt": "Include Reposts",
+      "value": "on"
+    },
+    {
+      "name": "include_quotes",
+      "type": "switch",
+      "prompt": "Include Quotes",
+      "value": "on"
+    },
+    {
+      "name": "include_replies",
+      "type": "switch",
+      "prompt": "Include Replies",
+      "value": "off"
+    },
+    {
+      "name": "refresh_interval",
+      "type": "choices",
+      "prompt": "Minimum Refresh Interval (minutes)",
+      "choices": "30,60,120",
+      "value": "30"
+    }
+  ]
+}

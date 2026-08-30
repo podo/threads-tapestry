@@ -1,0 +1,16 @@
+{
+  "id": "local.threads.web",
+  "display_name": "Threads Web (Beta)",
+  "service_name": "Threads",
+  "default_color": "blue",
+  "icon": "https://www.threads.com/favicon.ico",
+  "item_style": "post",
+  "site": "https://www.threads.com",
+  "refresh_status_code": 0,
+  "needs_verification": true,
+  "verify_variables": true,
+  "provides_attachments": true,
+  "synchronizable_credentials": false,
+  "minimum_app_version": "1.5",
+  "version": 1
+}

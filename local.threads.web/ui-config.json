@@ -1,0 +1,75 @@
+{
+  "inputs": [
+    {
+      "name": "sessionid",
+      "type": "text",
+      "prompt": "sessionid cookie"
+    },
+    {
+      "name": "csrftoken",
+      "type": "text",
+      "prompt": "csrftoken cookie"
+    },
+    {
+      "name": "ds_user_id",
+      "type": "text",
+      "prompt": "ds_user_id cookie"
+    },
+    {
+      "name": "mid",
+      "type": "text",
+      "prompt": "mid cookie"
+    },
+    {
+      "name": "ig_did",
+      "type": "text",
+      "prompt": "ig_did cookie"
+    },
+    {
+      "name": "rur",
+      "type": "text",
+      "prompt": "rur cookie (optional)"
+    },
+    {
+      "name": "query_doc_id",
+      "type": "text",
+      "prompt": "Home-feed GraphQL doc_id"
+    },
+    {
+      "name": "query_name",
+      "type": "text",
+      "prompt": "GraphQL friendly name (optional)"
+    },
+    {
+      "name": "query_variables",
+      "type": "text",
+      "prompt": "Captured variables JSON",
+      "value": "{\"first\":25,\"after\":\"__CURSOR__\"}"
+    },
+    {
+      "name": "include_reposts",
+      "type": "switch",
+      "prompt": "Include Reposts",
+      "value": "on"
+    },
+    {
+      "name": "include_quotes",
+      "type": "switch",
+      "prompt": "Include Quotes",
+      "value": "on"
+    },
+    {
+      "name": "include_replies",
+      "type": "switch",
+      "prompt": "Include Replies",
+      "value": "off"
+    },
+    {
+      "name": "refresh_interval",
+      "type": "choices",
+      "prompt": "Minimum Refresh Interval (minutes)",
+      "choices": "30,60,120",
+      "value": "30"
+    }
+  ]
+}

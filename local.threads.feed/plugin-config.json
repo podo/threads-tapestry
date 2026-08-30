@@ -1,0 +1,23 @@
+{
+  "id": "local.threads.feed",
+  "display_name": "Threads Feed",
+  "service_name": "Threads",
+  "default_color": "black",
+  "icon": "https://www.threads.com/favicon.ico",
+  "item_style": "post",
+  "site": "https://graph.threads.net",
+  "oauth_authorize": "https://threads.net/oauth/authorize",
+  "oauth_token": "https://graph.threads.net/oauth/access_token",
+  "oauth_type": "code",
+  "oauth_code_key": "code",
+  "oauth_scope": "threads_basic+threads_profile_discovery",
+  "oauth_grant_type": "authorization_code",
+  "oauth_http_redirect": true,
+  "needs_api_keys": true,
+  "needs_verification": true,
+  "verify_variables": true,
+  "provides_attachments": true,
+  "synchronizable_credentials": false,
+  "minimum_app_version": "1.3",
+  "version": 2
+}
