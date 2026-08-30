@@ -44,7 +44,7 @@
       "name": "query_variables",
       "type": "text",
       "prompt": "Captured variables JSON",
-      "value": "{\"first\":25,\"after\":\"__CURSOR__\"}"
+      "placeholder": "Paste the complete variables object; replace its cursor with __CURSOR__"
     },
     {
       "name": "include_reposts",

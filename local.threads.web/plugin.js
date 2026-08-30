@@ -513,6 +513,9 @@ function verify() {
   try { credentials(); variablesFor(null); } catch (error) { processError(error); return; }
   requestPage(null).then(page => {
     const user = identityFromPage(page);
+    if (!user) {
+      throw new Error("The selected GraphQL query returned no feed posts. Capture the /api/graphql pagination request created when scrolling the home feed, then paste its matching doc_id and complete variables JSON.");
+    }
     const handle = user ? usernameForUser(user) : "";
     const verification = { displayName: handle ? `Threads Web · @${handle}` : "Threads Web" };
     if (user) {

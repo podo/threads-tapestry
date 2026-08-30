@@ -7,7 +7,9 @@ home feed.
 
 ## Current status
 
-Version `0.3.0` adds the Threads Web beta connector and packaged end-to-end
+Version `0.3.1` improves Threads Web query validation, removes the misleading
+generic variables default, and supplies a durable connector logo. Version
+`0.3.0` added the Threads Web beta connector and packaged end-to-end
 render tests. It supports profile pictures, full names, handles, text, images,
 video, carousels, quote posts, repost/reply context, and URL preview cards.
 

@@ -232,6 +232,13 @@ async function runSource(pluginSource = source) {
   vm.runInContext("verify()", invalidVariables);
   await settle();
   assert.match(invalidVariables.error.message, /valid JSON/);
+
+  const wrongQuery = makeContext(pluginSource, {
+    sendRequest: async () => fullResponse({ data: { xth_threads_viewer: { feed_name: "For You" } } })
+  });
+  vm.runInContext("verify()", wrongQuery);
+  await settle();
+  assert.match(wrongQuery.error.message, /returned no feed posts/);
 }
 
 module.exports = { runSource };

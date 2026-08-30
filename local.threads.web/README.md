@@ -10,15 +10,17 @@ Threads website uses. It does not ask for a list of accounts.
 2. In a desktop browser, open Developer Tools, select **Network**, reload the
    Threads home feed, and select the `/api/graphql` request that returns feed
    posts.
-3. From that request, copy the `doc_id`, the optional `X-FB-Friendly-Name`, and
-   the `variables` JSON. Replace the pagination cursor value in the JSON with
-   the literal string `__CURSOR__`.
+3. From that exact request, copy the `doc_id`, the optional
+   `X-FB-Friendly-Name`, and the **complete** `variables` JSON. Replace only the
+   pagination cursor value in the JSON with the literal string `__CURSOR__`.
 4. From the browser's Threads cookies, enter `sessionid`, `csrftoken`,
    `ds_user_id`, `mid`, and `ig_did`. `rur` is optional.
 5. Save the connector, then preview it in Tapestry Loom before normal use.
 
 The feed query ID is a private, rotating implementation detail. When Threads
 changes it, capture a fresh working request and update the two query fields.
+The `BarcelonaFeedsTabGroupViewerQuery` request only fetches feed-tab metadata;
+it does not contain posts and cannot be used as the home-feed query.
 
 ## Security
 
