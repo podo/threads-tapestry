@@ -244,14 +244,14 @@ async function run() {
   assert.match(text.body, /<a href="https:\/\/www\.threads\.com\/@bob">@bob<\/a>/);
   assert.match(text.body, /<a href="[^"]*threads[^"]*">#threads<\/a>/);
   assert.match(text.body, /<a href="https:\/\/example\.com\/read">/);
-  assert.match(text.body, /service-caption/);
-  assert.match(text.body, /<!-- .*@plugin8@0\.6\.0 -->/);
+  assert.match(text.body, /threads-meta-host/);
+  assert.match(text.body, /<!-- .*@plugin9@0\.7\.0 -->/);
   assert.ok(text.actions.like);
   assert.ok(text.actions.save);
   assert.ok(text.actions.repost);
   assert.ok(text.actions.thread);
   assert.ok(text.actions.openLink);
-  assert.match(text.actions._connectorBuild, /@plugin8@0\.6\.0/);
+  assert.match(text.actions._connectorBuild, /@plugin9@0\.7\.0/);
   assert.ok(text.actions._bodyAnchorCount >= 3);
   assert.match(text.author.avatar, /^data:image\/jpeg;base64,/);
   assert.match(text.actions._authorAvatarAssigned, /^data:/);
@@ -284,7 +284,7 @@ async function run() {
 
   const repost = byUri("repost-1");
   assert.strictEqual(repost.author.name, "Ivy Original");
-  assert.strictEqual(repost.annotations[0].text, "Reposted by Henry Reposter");
+  assert.strictEqual(repost.annotations[0].text, "Reposted by @henry");
 
   const spoiler = byUri("spoiler-1");
   assert.strictEqual(spoiler.contentWarning, "Spoiler");
@@ -296,6 +296,13 @@ async function run() {
   assert.ok(context.actionResult.actions.unlike);
   assert.ok(!context.actionResult.actions.like);
   assert.ok(context.requests.some(request => request.method === "POST" && /\/like\/$/.test(request.url)));
+  // Seed metrics in body then confirm like bumps the count.
+  context.__actionItem.body = '<p class="threads-meta-metrics"><small>2 likes</small></p><!-- stamp -->';
+  context.__actionItem.actions = Object.assign({}, text.actions);
+  vm.runInContext('performAction("like", __actionItem.actions.like, __actionItem)', context);
+  await settle();
+  assert.ifError(context.actionError);
+  assert.match(context.actionResult.body, /3 likes/);
 
   context.actionResult = null;
   context.actionError = null;
@@ -320,7 +327,9 @@ async function run() {
   vm.runInContext("load()", withMetrics);
   await settle();
   assert.ifError(withMetrics.error);
-  assert.ok(withMetrics.results[0].annotations.some(item => /5 likes/.test(item.text)));
+  assert.match(withMetrics.results[0].body, /threads-meta-metrics/);
+  assert.match(withMetrics.results[0].body, /5 likes/);
+  assert.ok(!(withMetrics.results[0].annotations || []).some(item => /likes/.test(item.text)));
 
   const noMetrics = makeContext({
     show_metrics: "off",
@@ -337,6 +346,7 @@ async function run() {
   vm.runInContext("load()", noMetrics);
   await settle();
   assert.ifError(noMetrics.error);
+  assert.ok(!/threads-meta-metrics/.test(noMetrics.results[0].body || ""));
   assert.ok(!(noMetrics.results[0].annotations || []).some(item => /likes/.test(item.text)));
 
   const capped = makeContext({ following_account_cap: "8" });

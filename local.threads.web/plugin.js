@@ -11,9 +11,9 @@ const GRAPHQL_PATH = "/api/graphql/";
 const READ_USER_AGENT = "Barcelona 289.0.0.14.109 Android";
 const THREADS_APP_ID = "238260118697367";
 const DEFAULT_GRAPHQL_VARIABLES = { first: 25, after: "__CURSOR__", scale: 2 };
-const connectorBuildId = "2026-08-31T20:35Z-hwm-avatars";
-const connectorPluginVersion = 8;
-const connectorRelease = "0.6.0";
+const connectorBuildId = "2026-08-31T21:40Z-card-order";
+const connectorPluginVersion = 9;
+const connectorRelease = "0.7.0";
 
 let avatarDataUrlCache = null;
 
@@ -94,31 +94,123 @@ function linkifyInline(escapedHtml) {
   return html;
 }
 
-function textBody(value) {
-  const text = stringValue(value).trim();
-  if (!text) return "";
-  let caption = text;
-  let trailingUrl = "";
-  const trailing = text.match(/^(.*?)(?:\s+)((?:https?:\/\/|www\.)[^\s]+)$/s);
-  if (trailing) {
-    const candidate = trimUrlPunctuation(trailing[2]);
-    if (safeUrl(candidate.label)) {
-      caption = trailing[1].trim();
-      trailingUrl = candidate.label + candidate.trailing;
-    }
+function isThreadsUrl(url) {
+  const host = urlHost(url);
+  return /(^|\.)threads\.(com|net)$/i.test(host);
+}
+
+function articleUrlForPost(post) {
+  const preview = linkPreviewForPost(post) || {};
+  const fromPreview = safeUrl(firstValue(preview, ["url", "uri", "link_url"]));
+  if (fromPreview && !isThreadsUrl(fromPreview)) return fromPreview;
+  const external = safeUrl(firstValue(post, ["externalUrl", "external_url"]));
+  if (external && !isThreadsUrl(external)) return external;
+  const text = stringValue(postText(post));
+  const match = text.match(/(?:https?:\/\/|www\.)[^\s<>"']+/i);
+  if (!match) return "";
+  const trimmed = trimUrlPunctuation(match[0]);
+  const href = safeUrl(trimmed.label);
+  return href && !isThreadsUrl(href) ? href : "";
+}
+
+function metricsCountsForPost(post) {
+  return {
+    likes: Number(firstValue(post, ["like_count", "likeCount", "likes"]) || 0),
+    replies: Number(firstValue(post, ["reply_count", "replyCount", "comment_count"]) || firstValue(appInfo(post), ["direct_reply_count", "reply_count"]) || 0),
+    reposts: Number(firstValue(post, ["repost_count", "repostCount", "reshare_count"]) || firstValue(appInfo(post), ["repost_count"]) || 0)
+  };
+}
+
+function metricsTextFromCounts(metrics) {
+  const details = [];
+  if (metrics.replies > 0) details.push(`${metrics.replies} ${metrics.replies === 1 ? "reply" : "replies"}`);
+  if (metrics.reposts > 0) details.push(`${metrics.reposts} reposts`);
+  if (metrics.likes > 0) details.push(`${metrics.likes} likes`);
+  return details.join(" - ");
+}
+
+function metricsMetaHtml(text) {
+  return `<p class="threads-meta-metrics"><small>${escapeHtml(text)}</small></p>`;
+}
+
+function postMetaHtml(post) {
+  const blocks = [];
+  const article = articleUrlForPost(post);
+  if (article) {
+    const label = urlHost(article) || article;
+    blocks.push(`<p class="threads-meta-host"><a href="${escapeHtml(article)}">${escapeHtml(label)}</a></p>`);
   }
-  const parts = [];
-  if (caption) {
-    const linked = linkifyInline(escapeHtml(caption).replace(/\r?\n/g, "<br>"));
-    parts.push(`<p class="service-caption"><small>${linked}</small></p>`);
+  if (showMetrics()) {
+    const text = metricsTextFromCounts(metricsCountsForPost(post));
+    if (text) blocks.push(metricsMetaHtml(text));
   }
-  if (trailingUrl) {
-    const trimmed = trimUrlPunctuation(trailingUrl);
+  return blocks.join("");
+}
+
+function buildSplitLinkBody(text) {
+  const value = stringValue(text).trim();
+  if (!value) return "";
+  const urls = [];
+  let caption = value.replace(/(?:https?:\/\/|www\.)[^\s<]+/gi, match => {
+    const trimmed = trimUrlPunctuation(match);
     const href = safeUrl(trimmed.label);
-    if (href) parts.push(`<p><a href="${escapeHtml(href)}">${escapeHtml(trimmed.label)}</a>${escapeHtml(trimmed.trailing)}</p>`);
+    if (!href) return match;
+    urls.push(href);
+    return trimmed.trailing || "";
+  });
+  caption = caption.replace(/[ \t]{2,}/g, " ").replace(/^\s+|\s+$/g, "");
+  const blocks = [];
+  if (caption) {
+    blocks.push(`<p>${linkifyInline(escapeHtml(caption).replace(/\r?\n/g, "<br>"))}</p>`);
   }
-  const html = parts.join("") || `<p class="service-caption"><small>${linkifyInline(escapeHtml(text).replace(/\r?\n/g, "<br>"))}</small></p>`;
+  const seen = {};
+  for (const url of urls) {
+    if (seen[url]) continue;
+    seen[url] = true;
+    blocks.push(`<p><a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>`);
+  }
+  if (!blocks.length) {
+    return `<p>${linkifyInline(escapeHtml(value).replace(/\r?\n/g, "<br>"))}</p>`;
+  }
+  return blocks.join("");
+}
+
+function postBody(post) {
+  const meta = postMetaHtml(post);
+  const caption = buildSplitLinkBody(postText(post));
+  const html = meta + caption;
+  if (!html) return `<!-- ${escapeHtml(connectorStamp())} -->`;
   return `${html}<!-- ${escapeHtml(connectorStamp())} -->`;
+}
+
+function parseMetricsFromText(text) {
+  const value = stringValue(text);
+  const metrics = { replies: 0, reposts: 0, likes: 0 };
+  const replies = value.match(/([\d,.]+)\s+replies?/i);
+  const reposts = value.match(/([\d,.]+)\s+reposts?/i);
+  const likes = value.match(/([\d,.]+)\s+likes?/i);
+  if (replies) metrics.replies = Number(String(replies[1]).replace(/,/g, "")) || 0;
+  if (reposts) metrics.reposts = Number(String(reposts[1]).replace(/,/g, "")) || 0;
+  if (likes) metrics.likes = Number(String(likes[1]).replace(/,/g, "")) || 0;
+  if (!replies && !reposts && !likes) return null;
+  return metrics;
+}
+
+function adjustEngagementBodyMetrics(body, actionId) {
+  const html = stringValue(body);
+  const match = html.match(/<p class="threads-meta-metrics">([\s\S]*?)<\/p>/i);
+  if (!match) return body;
+  const inner = stringValue(match[1]).replace(/<\/?small>/gi, "");
+  const metrics = parseMetricsFromText(inner);
+  if (!metrics) return body;
+  if (actionId === "like") metrics.likes += 1;
+  else if (actionId === "unlike") metrics.likes = Math.max(0, metrics.likes - 1);
+  else if (actionId === "repost") metrics.reposts += 1;
+  else if (actionId === "unrepost") metrics.reposts = Math.max(0, metrics.reposts - 1);
+  else return body;
+  const nextText = metricsTextFromCounts(metrics);
+  if (!nextText) return html.replace(match[0], "");
+  return html.replace(match[0], metricsMetaHtml(nextText));
 }
 
 function urlHost(url) {
@@ -662,10 +754,10 @@ function mediaAttachments(post) {
     const media = makeMedia(post);
     if (media) attachments.push(media);
   }
-  const link = makeLinkAttachment(post);
-  if (link) attachments.push(link);
   const poll = makePollAttachment(post);
   if (poll) attachments.push(poll);
+  const link = makeLinkAttachment(post);
+  if (link) attachments.push(link);
   return attachments;
 }
 
@@ -709,26 +801,6 @@ function actionsForPost(post, uri, bodyHtml) {
   return actions;
 }
 
-function metricAnnotations(post) {
-  const annotations = [];
-  const likes = Number(firstValue(post, ["like_count", "likeCount", "likes"]) || 0);
-  const replies = Number(firstValue(post, ["reply_count", "replyCount", "comment_count"]) || firstValue(appInfo(post), ["direct_reply_count", "reply_count"]) || 0);
-  const reposts = Number(firstValue(post, ["repost_count", "repostCount", "reshare_count"]) || firstValue(appInfo(post), ["repost_count"]) || 0);
-  if (likes > 0) {
-    const value = createAnnotation(`${likes} likes`);
-    if (value) annotations.push(value);
-  }
-  if (replies > 0) {
-    const value = createAnnotation(`${replies} replies`);
-    if (value) annotations.push(value);
-  }
-  if (reposts > 0) {
-    const value = createAnnotation(`${reposts} reposts`);
-    if (value) annotations.push(value);
-  }
-  return annotations;
-}
-
 function postToItem(post, depth) {
   if (!post || depth > 1) return null;
   const originalRepost = nestedPost(post, ["repostedPost", "reposted_post", "repost"]);
@@ -738,8 +810,33 @@ function postToItem(post, depth) {
   const uri = postPermalink(post, userForPost(post)) || postPermalink(sourcePost, sourceUser);
   if (!date || !uri || typeof Item === "undefined" || typeof Item.createWithUriDate !== "function") return null;
   const item = Item.createWithUriDate(uri, date);
-  const body = textBody(postText(sourcePost));
+
+  const body = postBody(sourcePost);
   if (body) item.body = body;
+
+  if (post.isSpoilerMedia || post.is_spoiler_media || post.contentWarning || post.content_warning) {
+    item.contentWarning = post.contentWarning || post.content_warning || "Spoiler";
+  }
+
+  // Loom renders native annotations above Service/Author — only arrival context.
+  const annotations = [];
+  if (originalRepost) {
+    const reposter = userForPost(post);
+    const handle = usernameForUser(reposter);
+    const text = handle ? `Reposted by @${handle}` : `Reposted by ${nameForUser(reposter)}`;
+    const annotation = createAnnotation(text, uriForUser(reposter), avatarForUser(reposter));
+    if (annotation) annotations.push(annotation);
+  }
+  if (isReply(post)) {
+    const parent = nestedPost(post, ["replyTo", "reply_to", "parent", "reply_to_post"]);
+    const parentUser = parent ? userForPost(parent) : {};
+    const handle = usernameForUser(parentUser);
+    const text = handle ? `Reply to @${handle}` : "Reply";
+    const annotation = createAnnotation(text, uriForUser(parentUser), avatarForUser(parentUser));
+    if (annotation) annotations.push(annotation);
+  }
+  if (annotations.length) item.annotations = annotations;
+
   const attachments = mediaAttachments(sourcePost);
   const quote = nestedPost(sourcePost, ["quotedPost", "quoted_post", "quoted_post_media"]);
   if (quote) {
@@ -747,26 +844,10 @@ function postToItem(post, depth) {
     if (quotedItem) attachments.push(quotedItem);
   }
   if (attachments.length) item.attachments = attachments;
-  const annotations = [];
-  if (originalRepost) {
-    const reposter = userForPost(post);
-    const annotation = createAnnotation(`Reposted by ${nameForUser(reposter)}`, uriForUser(reposter), avatarForUser(reposter));
-    if (annotation) annotations.push(annotation);
-  }
-  if (isReply(post)) {
-    const parent = nestedPost(post, ["replyTo", "reply_to", "parent", "reply_to_post"]);
-    const parentUser = parent ? userForPost(parent) : {};
-    const annotation = createAnnotation(`Replying to ${usernameForUser(parentUser) || nameForUser(parentUser)}`, uriForUser(parentUser), avatarForUser(parentUser));
-    if (annotation) annotations.push(annotation);
-  }
-  for (const metric of (showMetrics() ? metricAnnotations(sourcePost) : [])) annotations.push(metric);
-  if (annotations.length) item.annotations = annotations;
-  if (depth === 0) item.actions = actionsForPost(sourcePost, uri, body);
-  if (post.isSpoilerMedia || post.is_spoiler_media || post.contentWarning || post.content_warning) {
-    item.contentWarning = post.contentWarning || post.content_warning || "Spoiler";
-  }
-  // Assign author last — Loom identity quirks (X lesson).
+
+  // Assign author last — matches X / Bluesky and Loom identity quirks.
   item.author = identityForUser(sourceUser);
+  if (depth === 0) item.actions = actionsForPost(sourcePost, uri, body);
   return item;
 }
 
@@ -826,6 +907,9 @@ function toggleRemoteAction(item, actionId) {
   actions[replacement] = payload;
   actions._connectorBuild = connectorStamp();
   item.actions = actions;
+  if (actionId === "like" || actionId === "unlike" || actionId === "repost" || actionId === "unrepost") {
+    item.body = adjustEngagementBodyMetrics(item.body, actionId);
+  }
   return item;
 }
 

@@ -19,7 +19,7 @@ unzip -t Threads.tapestry
 unzip -l Threads.tapestry
 ```
 
-Expect `plugin-config.json` `version` **8** for this release and
+Expect `plugin-config.json` `version` **9** for this release and
 `actions` / `discovery` / `suggestions` / `apps` / `TESTING.md` in the archive.
 
 ## Loom review checklist
@@ -29,19 +29,20 @@ Install [v0.6.0 `Threads.tapestry`](https://github.com/podo/threads-tapestry/rel
 
 ### Reload proof
 
-1. Console on Verify/Load: `threads-web … @plugin8@0.6.0`
+1. Console on Verify/Load: `threads-web … @plugin9@0.7.0`
 2. Any item: `actions._connectorBuild` and body HTML comment match that stamp
-3. `actions._authorAvatarAssigned` is `data:N` when embed worked, or `url:host` fallback
+3. Body starts with optional `threads-meta-host` then `threads-meta-metrics` (when metrics on), then caption
+4. `actions._authorAvatarAssigned` is `data:N` when embed worked, or `url:host` fallback
 
 ### Presentation (links → post → actions)
 
 1. Blue `<a href>` body links; mentions/hashtags tappable
-2. Titled link cards; media+URL posts keep both
-3. Author last; caption `service-caption`; video posters; carousels
-4. Metrics annotations when **Show Metrics** is on (off hides them)
-5. Like / save / repost toggle filled icons on success
-6. Thread context returns parent + replies when the replies endpoint works
-7. Open in Threads opens the post URI
+2. Titled link cards; media+URL posts keep both; attachment order media → poll → link → quote
+3. Host + metrics meta under author (not as native metric annotations)
+4. Like / save / repost toggle filled icons; like/repost also bump body metrics
+5. Thread context returns parent + replies when the replies endpoint works
+6. Open in Threads opens the post URI
+7. Annotations only `Reposted by @…` / `Reply to @…`
 
 ### Feeds
 

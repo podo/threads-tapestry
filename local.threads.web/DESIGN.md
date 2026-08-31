@@ -25,22 +25,21 @@ empty text accepted by `verify()` / `load()` without throwing.
 
 ## Item information architecture
 
-1. Caption body: escaped HTML with linked URLs, `@mentions`, and `#hashtags`
-   (caption and trailing URL in separate `<p>` blocks when possible).
-2. Native media: image, GIF, video (with poster), carousel slides, then titled
-   link card (media + card when both exist).
-3. Quoted post as nested `Item` attachment (depth ≤ 1).
-4. Annotations: repost / reply context, plus like/reply/repost counts when
-   **Show Metrics** is on.
-5. Actions: like, save, repost (toggle state machines), open in Threads, thread
-   context. Cookie writes use `/web/…` then `/media/…` on `www.threads.com`;
-   optional Bearer is attached on write requests only.
-6. Author identity last; avatars embedded as `data:image/…;base64,…` when the CDN
-   fetch succeeds (cdninstagram / fbcdn / scontent).
-7. `contentWarning` only from explicit spoiler flags.
+Card chrome order (Loom `post` style), matching X:
 
-Desired order: author → visual → caption → annotations → actions. Native Tapestry
-attachments may render under the HTML body; that is an API limitation.
+1. Native annotations **only** for `Reposted by @handle` / `Reply to @handle` (above Service).
+2. Service → Author.
+3. Body meta first: external link host, then metrics in
+   `<p class="threads-meta-metrics"><small>…</small></p>` when **Show Metrics** is on.
+4. Caption as normal `<p>` with linked URLs, `@mentions`, `#hashtags`; article URLs in
+   their own `<p><a>` blocks.
+5. Attachments under body: media → poll → titled link card → quoted item.
+6. Actions: like / save / repost toggles also update the body metrics line;
+   open in Threads; thread context.
+7. Author identity assigned last; avatars embedded as data URLs when CDN fetch works.
+8. `contentWarning` only from explicit spoiler flags.
+
+Native Tapestry attachments may render under the HTML body; that is an API limitation.
 
 ## Feed modes
 

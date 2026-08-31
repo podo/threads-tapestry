@@ -12,5 +12,5 @@
   "provides_attachments": true,
   "synchronizable_credentials": false,
   "minimum_app_version": "1.5",
-  "version": 8
+  "version": 9
 }
