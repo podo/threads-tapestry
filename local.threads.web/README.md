@@ -13,16 +13,18 @@ Cookie-authenticated Threads home connector. Default feed is **Following**
 4. Leave **Feed** on `following` for cookie-only use. For **For You**, capture the
    home-feed `/api/graphql` `doc_id` from the Network tab and paste it into the
    optional field.
-5. Save, Verify, then Load in Tapestry Loom.
+5. Optional: **Show Metrics**, **Following Account Cap**, and **Authorization
+   Bearer** (writes only — leave blank unless cookie like/save fails).
+6. Save, Verify, then Load in Tapestry Loom.
 
 Treat cookie values as account credentials. Do not share them or commit them.
 
 ## Item support
 
 Text (blue linked URLs, mentions, hashtags), images, GIFs, video with posters,
-carousels, titled link preview cards, quotes, reposts, replies, and metric
-annotations. Actions: like, save, repost, open in Threads, thread context.
-Content warnings only when Threads marks spoiler media.
+carousels, titled link preview cards, quotes, reposts, replies, metric
+annotations, and embedded author avatars. Actions: like, save, repost, open in
+Threads, thread context.
 
 ## Packaging
 
@@ -31,5 +33,4 @@ npm test
 npm run build
 ```
 
-Installable archive: `dist/Threads.tapestry` (includes actions / discovery /
-suggestions / apps).
+Installable archive: `dist/Threads.tapestry`. Loom checklist: `TESTING.md`.

@@ -62,6 +62,25 @@
       "value": "off"
     },
     {
+      "name": "show_metrics",
+      "type": "switch",
+      "prompt": "Show Metrics",
+      "value": "on"
+    },
+    {
+      "name": "following_account_cap",
+      "type": "choices",
+      "prompt": "Following Account Cap",
+      "choices": "8,12,20,40",
+      "value": "12"
+    },
+    {
+      "name": "authorization_bearer",
+      "type": "text",
+      "prompt": "Authorization Bearer (optional writes)",
+      "placeholder": "Leave blank; only if cookie like/save/repost fails"
+    },
+    {
       "name": "refresh_interval",
       "type": "choices",
       "prompt": "Minimum Refresh Interval (minutes)",

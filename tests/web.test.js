@@ -16,8 +16,17 @@ function user(username, fullName, pk) {
     pk: pk || username,
     username,
     full_name: fullName,
-    profile_pic_url: `https://cdn.example/${username}.jpg`
+    profile_pic_url: `https://scontent.cdninstagram.com/${username}.jpg`
   };
+}
+
+function imageFullResponse(bytes = [0xff, 0xd8, 0xff, 0xd9]) {
+  const body = Buffer.from(bytes).toString("base64");
+  return JSON.stringify({
+    status: 200,
+    headers: { "content-type": "image/jpeg" },
+    body
+  });
 }
 
 function postsFixture() {
@@ -152,9 +161,13 @@ function makeContext(overrides = {}) {
     include_reposts: "on",
     include_quotes: "on",
     include_replies: "off",
+    show_metrics: "on",
+    following_account_cap: "12",
+    authorization_bearer: "",
     refresh_interval: "30",
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
       context.requests.push({ url, method, params, headers, fullResponseRequested });
+      if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
       if (url.indexOf("/api/graphql") >= 0) return fullResponse(graphqlFixture());
       return restRouter(url, method);
     },
@@ -195,6 +208,9 @@ async function run() {
   assert.ok(uiConfig.inputs.some(input => input.name === "ds_user_id"));
   assert.ok(!uiConfig.inputs.some(input => input.name === "cookie_header"));
   assert.ok(uiConfig.inputs.some(input => input.name === "query_doc_id" && !input.value));
+  assert.ok(uiConfig.inputs.some(input => input.name === "show_metrics"));
+  assert.ok(uiConfig.inputs.some(input => input.name === "following_account_cap"));
+  assert.ok(uiConfig.inputs.some(input => input.name === "authorization_bearer" && !input.value));
   assert.ok(!uiConfig.inputs.some(input => input.name === "query_variables"));
 
   const context = makeContext();
@@ -205,7 +221,7 @@ async function run() {
   assert.strictEqual(context.verification.icon, undefined);
   assert.deepStrictEqual(
     JSON.parse(JSON.stringify(context.verification.accountIdentity)),
-    { name: "Alice Example", username: "@alice", avatar: "https://cdn.example/alice.jpg", uri: "https://www.threads.com/@alice" }
+    { name: "Alice Example", username: "@alice", avatar: "https://scontent.cdninstagram.com/alice.jpg", uri: "https://www.threads.com/@alice" }
   );
   assert.ok(context.requests.some(request => request.url.indexOf("/api/v1/accounts/current_user/") >= 0));
   assert.ok(!context.requests.some(request => request.url.indexOf("/api/graphql") >= 0));
@@ -229,14 +245,16 @@ async function run() {
   assert.match(text.body, /<a href="[^"]*threads[^"]*">#threads<\/a>/);
   assert.match(text.body, /<a href="https:\/\/example\.com\/read">/);
   assert.match(text.body, /service-caption/);
-  assert.match(text.body, /<!-- .*@plugin7@0\.5\.0 -->/);
+  assert.match(text.body, /<!-- .*@plugin8@0\.6\.0 -->/);
   assert.ok(text.actions.like);
   assert.ok(text.actions.save);
   assert.ok(text.actions.repost);
   assert.ok(text.actions.thread);
   assert.ok(text.actions.openLink);
-  assert.match(text.actions._connectorBuild, /@plugin7@0\.5\.0/);
+  assert.match(text.actions._connectorBuild, /@plugin8@0\.6\.0/);
   assert.ok(text.actions._bodyAnchorCount >= 3);
+  assert.match(text.author.avatar, /^data:image\/jpeg;base64,/);
+  assert.match(text.actions._authorAvatarAssigned, /^data:/);
 
   const image = byUri("image-1").attachments[0];
   assert.strictEqual(image.url, "https://cdn.example/image-large.jpg");
@@ -287,6 +305,74 @@ async function run() {
   assert.ok(Array.isArray(context.actionResult));
   assert.ok(context.actionResult.length >= 2);
 
+  const metricPost = Object.assign({}, postsFixture()[0], { like_count: 5, reply_count: 2 });
+  const withMetrics = makeContext({
+    sendRequest: async (url, method, params, headers, fullResponseRequested) => {
+      withMetrics.requests.push({ url, method, params, headers, fullResponseRequested });
+      if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
+      if (url.indexOf("/text_feed/1/profile/") >= 0) {
+        return fullResponse({ threads: [{ thread_items: [{ post: metricPost }] }], next_max_id: null });
+      }
+      return restRouter(url, method);
+    },
+    requests: []
+  });
+  vm.runInContext("load()", withMetrics);
+  await settle();
+  assert.ifError(withMetrics.error);
+  assert.ok(withMetrics.results[0].annotations.some(item => /5 likes/.test(item.text)));
+
+  const noMetrics = makeContext({
+    show_metrics: "off",
+    sendRequest: async (url, method, params, headers, fullResponseRequested) => {
+      noMetrics.requests.push({ url, method, params, headers, fullResponseRequested });
+      if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
+      if (url.indexOf("/text_feed/1/profile/") >= 0) {
+        return fullResponse({ threads: [{ thread_items: [{ post: metricPost }] }], next_max_id: null });
+      }
+      return restRouter(url, method);
+    },
+    requests: []
+  });
+  vm.runInContext("load()", noMetrics);
+  await settle();
+  assert.ifError(noMetrics.error);
+  assert.ok(!(noMetrics.results[0].annotations || []).some(item => /likes/.test(item.text)));
+
+  const capped = makeContext({ following_account_cap: "8" });
+  vm.runInContext("load()", capped);
+  await settle();
+  assert.ifError(capped.error);
+  assert.ok(capped.requests.some(request => /\/friendships\/1\/following\/\?count=8/.test(request.url)));
+
+  const bearerLike = makeContext({ authorization_bearer: "IGT:2:fixture" });
+  vm.runInContext("load()", bearerLike);
+  await settle();
+  bearerLike.__actionItem = Object.assign({}, bearerLike.results[0], { actions: Object.assign({}, bearerLike.results[0].actions) });
+  vm.runInContext('performAction("like", __actionItem.actions.like, __actionItem)', bearerLike);
+  await settle();
+  assert.ifError(bearerLike.actionError);
+  assert.ok(bearerLike.requests.some(request =>
+    request.method === "POST" && /\/like\/$/.test(request.url) && request.headers.Authorization === "Bearer IGT:2:fixture"
+  ));
+
+  // Per-mode high-water: second Following load with same state returns empty.
+  const hwm = makeContext();
+  vm.runInContext("load()", hwm);
+  await settle(80);
+  assert.ok(hwm.results.length > 0);
+  hwm.results = null;
+  hwm.complete = null;
+  // Clear refresh throttle so second load runs.
+  const stored = JSON.parse(hwm.getItem("threadsWebStateV1"));
+  stored.loadedAt = 0;
+  hwm.setItem("threadsWebStateV1", JSON.stringify(stored));
+  vm.runInContext("load()", hwm);
+  await settle(80);
+  assert.ifError(hwm.error);
+  assert.strictEqual(hwm.results.length, 0);
+  assert.ok(JSON.parse(hwm.getItem("threadsWebStateV1")).modes.following.ids.length > 0);
+
   const emptyDoc = makeContext({ query_doc_id: "" });
   vm.runInContext("load()", emptyDoc);
   await settle();
@@ -302,6 +388,7 @@ async function run() {
     query_doc_id: "99999999999999999",
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
       forYou.requests.push({ url, method, params, headers, fullResponseRequested });
+      if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
       if (url.indexOf("/api/graphql") >= 0) return fullResponse(graphqlFixture());
       return restRouter(url, method);
     },

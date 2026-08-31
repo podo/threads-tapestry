@@ -1,17 +1,21 @@
 const STATE_KEY = "threadsWebStateV1";
 const MAX_BACKFILL_PAGES = 3;
 const MAX_STORED_IDS = 100;
-const MAX_FOLLOWING = 12;
+const DEFAULT_FOLLOWING_CAP = 12;
 const POSTS_PER_FOLLOWING = 8;
 const FOLLOWING_CONCURRENCY = 4;
+const AVATAR_EMBED_CONCURRENCY = 4;
+const MAX_AVATAR_BYTES = 200000;
 const GRAPHQL_PATH = "/api/graphql/";
 // Threads rejects desktop browser UAs on cookie REST with "useragent mismatch".
 const READ_USER_AGENT = "Barcelona 289.0.0.14.109 Android";
 const THREADS_APP_ID = "238260118697367";
 const DEFAULT_GRAPHQL_VARIABLES = { first: 25, after: "__CURSOR__", scale: 2 };
-const connectorBuildId = "2026-08-31T20:15Z-links-actions";
-const connectorPluginVersion = 7;
-const connectorRelease = "0.5.0";
+const connectorBuildId = "2026-08-31T20:35Z-hwm-avatars";
+const connectorPluginVersion = 8;
+const connectorRelease = "0.6.0";
+
+let avatarDataUrlCache = null;
 
 function connectorStamp() {
   return `${connectorBuildId}@plugin${connectorPluginVersion}@${connectorRelease}`;
@@ -195,7 +199,8 @@ function credentials() {
     mid: stringValue(typeof mid === "undefined" ? "" : mid).trim(),
     ig_did: stringValue(typeof ig_did === "undefined" ? "" : ig_did).trim(),
     rur: "",
-    docId: stringValue(typeof query_doc_id === "undefined" ? "" : query_doc_id).trim()
+    docId: stringValue(typeof query_doc_id === "undefined" ? "" : query_doc_id).trim(),
+    bearer: stringValue(typeof authorization_bearer === "undefined" ? "" : authorization_bearer).trim()
   };
 }
 
@@ -207,7 +212,7 @@ function cookieHeader(auth) {
   return values.join("; ");
 }
 
-function requestHeaders(auth, contentType) {
+function requestHeaders(auth, contentType, forWrite) {
   const headers = {
     "Accept": "*/*",
     "Cookie": cookieHeader(auth),
@@ -218,6 +223,9 @@ function requestHeaders(auth, contentType) {
     "X-IG-App-ID": THREADS_APP_ID
   };
   if (contentType) headers["Content-Type"] = contentType;
+  if (forWrite && auth.bearer) {
+    headers.Authorization = /^Bearer\s+/i.test(auth.bearer) ? auth.bearer : `Bearer ${auth.bearer}`;
+  }
   return headers;
 }
 
@@ -242,7 +250,7 @@ function restGet(auth, path, query) {
 }
 
 function restPost(auth, path, body) {
-  return sendRequest(`${site}${path}`, "POST", body, requestHeaders(auth, "application/x-www-form-urlencoded"), true)
+  return sendRequest(`${site}${path}`, "POST", body, requestHeaders(auth, "application/x-www-form-urlencoded", true), true)
     .then(parseFullResponse);
 }
 
@@ -269,9 +277,45 @@ function writeState(value) {
   if (typeof setItem === "function") setItem(STATE_KEY, JSON.stringify(value));
 }
 
+function modeStateKey() {
+  return feedKind();
+}
+
+function readModeState() {
+  const all = readState();
+  const modes = all.modes && typeof all.modes === "object" ? all.modes : {};
+  const mode = modes[modeStateKey()];
+  if (mode && typeof mode === "object") return mode;
+  // Migrate pre-0.6 flat lastSeenAt onto the active mode once.
+  if (all.lastSeenAt && modeStateKey() === "following") {
+    return { lastSeenAt: all.lastSeenAt, ids: Array.isArray(all.ids) ? all.ids : [] };
+  }
+  return { lastSeenAt: 0, ids: [] };
+}
+
+function writeModeState(feedSignature, modePartial) {
+  const all = readState();
+  const modes = Object.assign({}, all.modes && typeof all.modes === "object" ? all.modes : {});
+  modes[modeStateKey()] = Object.assign({}, modes[modeStateKey()] || {}, modePartial);
+  writeState({
+    signature: feedSignature,
+    loadedAt: Date.now(),
+    modes
+  });
+}
+
 function refreshMinutes() {
   const parsed = parseInt(typeof refresh_interval === "undefined" ? "30" : refresh_interval, 10);
   return [30, 60, 120].indexOf(parsed) >= 0 ? parsed : 30;
+}
+
+function showMetrics() {
+  return stringValue(typeof show_metrics === "undefined" ? "on" : show_metrics) !== "off";
+}
+
+function followingAccountCap() {
+  const parsed = parseInt(typeof following_account_cap === "undefined" ? String(DEFAULT_FOLLOWING_CAP) : following_account_cap, 10);
+  return [8, 12, 20, 40].indexOf(parsed) >= 0 ? parsed : DEFAULT_FOLLOWING_CAP;
 }
 
 function normalizeDate(post) {
@@ -320,6 +364,137 @@ function identityForUser(user) {
   const avatar = avatarForUser(user);
   if (avatar) identity.avatar = avatar;
   return identity;
+}
+
+function summarizeAvatar(url) {
+  const raw = stringValue(url);
+  if (!raw) return "missing";
+  if (raw.indexOf("data:image/") === 0) return `data:${raw.length}`;
+  const host = urlHost(raw);
+  return host ? `url:${host}` : "url";
+}
+
+function shouldEmbedAvatarUrl(url) {
+  const host = urlHost(url);
+  return !!host && /(cdninstagram|fbcdn|instagram\.|threads\.|scontent)/i.test(host);
+}
+
+function bytesToBase64(bytes) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let result = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const first = bytes[index];
+    const second = index + 1 < bytes.length ? bytes[index + 1] : 0;
+    const third = index + 2 < bytes.length ? bytes[index + 2] : 0;
+    const triple = (first << 16) | (second << 8) | third;
+    result += alphabet[(triple >> 18) & 63];
+    result += alphabet[(triple >> 12) & 63];
+    result += index + 1 < bytes.length ? alphabet[(triple >> 6) & 63] : "=";
+    result += index + 2 < bytes.length ? alphabet[triple & 63] : "=";
+  }
+  return result;
+}
+
+function base64ToBytes(value) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const cleaned = stringValue(value).replace(/[^A-Za-z0-9+/=]/g, "");
+  const bytes = [];
+  for (let index = 0; index < cleaned.length; index += 4) {
+    const a = alphabet.indexOf(cleaned[index]);
+    const b = alphabet.indexOf(cleaned[index + 1]);
+    const c = alphabet.indexOf(cleaned[index + 2]);
+    const d = alphabet.indexOf(cleaned[index + 3]);
+    if (a < 0 || b < 0) break;
+    bytes.push(((a << 2) | (b >> 4)) & 255);
+    if (c >= 0) bytes.push(((b << 4) | (c >> 2)) & 255);
+    if (d >= 0) bytes.push(((c << 6) | d) & 255);
+  }
+  return bytes;
+}
+
+function responseBodyBytes(envelope) {
+  const body = envelope && envelope.body;
+  if (body == null) return [];
+  if (Array.isArray(body)) return body.map(value => Number(value) & 255);
+  if (typeof body === "object" && Array.isArray(body.data)) return body.data.map(value => Number(value) & 255);
+  if (typeof body !== "string") return [];
+  const trimmed = body.trim();
+  if (trimmed.indexOf("data:image/") === 0) {
+    const comma = trimmed.indexOf(",");
+    return comma >= 0 ? base64ToBytes(trimmed.slice(comma + 1)) : [];
+  }
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed) && trimmed.length >= 24 && trimmed.length % 4 === 0) {
+    const decoded = base64ToBytes(trimmed);
+    if (decoded.length) return decoded;
+  }
+  const bytes = [];
+  for (let i = 0; i < body.length; i += 1) bytes.push(body.charCodeAt(i) & 255);
+  return bytes;
+}
+
+function headerValue(headers, name) {
+  if (!headers) return "";
+  const target = stringValue(name).toLowerCase();
+  for (const key of Object.keys(headers)) {
+    if (stringValue(key).toLowerCase() === target) return stringValue(headers[key]);
+  }
+  return "";
+}
+
+function avatarDataUrlForUrl(url) {
+  const normalized = safeUrl(url);
+  if (!normalized || !shouldEmbedAvatarUrl(normalized)) return Promise.resolve(normalized || url);
+  if (!avatarDataUrlCache) avatarDataUrlCache = {};
+  if (Object.prototype.hasOwnProperty.call(avatarDataUrlCache, normalized)) {
+    return Promise.resolve(avatarDataUrlCache[normalized]);
+  }
+  return sendRequest(normalized, "GET", null, {
+    "User-Agent": READ_USER_AGENT,
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+  }, true).then(text => {
+    let envelope;
+    try { envelope = JSON.parse(text); } catch (_) { envelope = null; }
+    if (!envelope || typeof envelope.status !== "number" || envelope.status < 200 || envelope.status >= 400) {
+      avatarDataUrlCache[normalized] = normalized;
+      return normalized;
+    }
+    const mime = (headerValue(envelope.headers, "content-type").split(";")[0] || "image/jpeg").trim() || "image/jpeg";
+    const bytes = responseBodyBytes(envelope);
+    if (!bytes.length || bytes.length > MAX_AVATAR_BYTES) {
+      avatarDataUrlCache[normalized] = normalized;
+      return normalized;
+    }
+    const dataUrl = `data:${mime};base64,${bytesToBase64(bytes)}`;
+    avatarDataUrlCache[normalized] = dataUrl;
+    return dataUrl;
+  }).catch(() => {
+    avatarDataUrlCache[normalized] = normalized;
+    return normalized;
+  });
+}
+
+function embedItemAvatar(item) {
+  if (!item || !item.author || !item.author.avatar) return Promise.resolve(item);
+  const input = item.author.avatar;
+  if (stringValue(input).indexOf("data:image/") === 0) {
+    if (item.actions) {
+      item.actions._authorAvatarInput = summarizeAvatar(input);
+      item.actions._authorAvatarAssigned = summarizeAvatar(input);
+    }
+    return Promise.resolve(item);
+  }
+  return avatarDataUrlForUrl(input).then(assigned => {
+    item.author.avatar = assigned || input;
+    if (item.actions) {
+      item.actions._authorAvatarInput = summarizeAvatar(input);
+      item.actions._authorAvatarAssigned = summarizeAvatar(item.author.avatar);
+    }
+    return item;
+  });
+}
+
+function embedItemAvatars(items) {
+  return mapPool(items, AVATAR_EMBED_CONCURRENCY, embedItemAvatar).then(() => items);
 }
 
 function userId(user) {
@@ -584,7 +759,7 @@ function postToItem(post, depth) {
     const annotation = createAnnotation(`Replying to ${usernameForUser(parentUser) || nameForUser(parentUser)}`, uriForUser(parentUser), avatarForUser(parentUser));
     if (annotation) annotations.push(annotation);
   }
-  for (const metric of metricAnnotations(sourcePost)) annotations.push(metric);
+  for (const metric of (showMetrics() ? metricAnnotations(sourcePost) : [])) annotations.push(metric);
   if (annotations.length) item.annotations = annotations;
   if (depth === 0) item.actions = actionsForPost(sourcePost, uri, body);
   if (post.isSpoilerMedia || post.is_spoiler_media || post.contentWarning || post.content_warning) {
@@ -777,7 +952,9 @@ function signature() {
     stringValue(typeof query_doc_id === "undefined" ? "" : query_doc_id),
     stringValue(typeof include_reposts === "undefined" ? "on" : include_reposts),
     stringValue(typeof include_quotes === "undefined" ? "on" : include_quotes),
-    stringValue(typeof include_replies === "undefined" ? "off" : include_replies)
+    stringValue(typeof include_replies === "undefined" ? "off" : include_replies),
+    stringValue(typeof show_metrics === "undefined" ? "on" : show_metrics),
+    stringValue(typeof following_account_cap === "undefined" ? String(DEFAULT_FOLLOWING_CAP) : following_account_cap)
   ].join("|");
 }
 
@@ -791,15 +968,16 @@ function shouldInclude(post) {
 function currentUser(auth) {
   return restGet(auth, "/api/v1/accounts/current_user/", "edit=true").then(body => {
     const user = firstValue(body, ["user", "current_user"]) || body.user || body;
-    if (!userId(user) && !usernameForUser(user)) throw new Error("Threads did not return the signed-in account. Refresh the Cookie Header.");
+    if (!userId(user) && !usernameForUser(user)) throw new Error("Threads did not return the signed-in account. Refresh sessionid and csrftoken.");
     return user;
   });
 }
 
 function followingUsers(auth, selfId) {
-  return restGet(auth, `/api/v1/friendships/${encodeURIComponent(selfId)}/following/`, `count=${MAX_FOLLOWING}`).then(body => {
+  const cap = followingAccountCap();
+  return restGet(auth, `/api/v1/friendships/${encodeURIComponent(selfId)}/following/`, `count=${cap}`).then(body => {
     const users = Array.isArray(body.users) ? body.users : [];
-    return users.slice(0, MAX_FOLLOWING);
+    return users.slice(0, cap);
   });
 }
 
@@ -838,7 +1016,7 @@ function collectFollowingPages(auth) {
         seen[target.id] = true;
         unique.push(target);
       }
-      // ponytail: capped parallel Following merge; raise MAX_FOLLOWING if Loom timeout budget grows
+      // ponytail: capped parallel Following merge; raise following_account_cap if Loom timeout budget grows
       return mapPool(unique, FOLLOWING_CONCURRENCY, target => userThreads(auth, target.id));
     });
   });
@@ -885,27 +1063,32 @@ function verify() {
 
 function load() {
   logBuild("load");
+  avatarDataUrlCache = {};
   let auth;
   try { auth = credentials(); } catch (error) { processError(error); return; }
   const state = readState();
   const feedSignature = signature();
+  const modeState = readModeState();
   if (state.signature === feedSignature && state.loadedAt && Date.now() - state.loadedAt < refreshMinutes() * 60000) {
     processResults([], true);
     return;
   }
-  const pageLimit = feedKind() === "for_you" ? (state.lastSeenAt ? 1 : MAX_BACKFILL_PAGES) : 1;
+  const knownIds = {};
+  for (const id of modeState.ids || []) knownIds[id] = true;
+  const pageLimit = feedKind() === "for_you" ? (modeState.lastSeenAt ? 1 : MAX_BACKFILL_PAGES) : 1;
   collectPages(auth, pageLimit).then(pages => {
     const items = [];
     const seen = {};
     const ids = [];
-    let newest = Number(state.lastSeenAt || 0);
+    let newest = Number(modeState.lastSeenAt || 0);
     for (const page of pages) {
       for (const post of flattenPage(page)) {
         if (!shouldInclude(post)) continue;
         const date = normalizeDate(post);
         const item = postToItem(post, 0);
         if (!date || !item || seen[item.uri]) continue;
-        if (state.lastSeenAt && date.getTime() <= Number(state.lastSeenAt)) continue;
+        if (knownIds[item.uri]) continue;
+        if (modeState.lastSeenAt && date.getTime() <= Number(modeState.lastSeenAt)) continue;
         seen[item.uri] = true;
         ids.push(item.uri);
         newest = Math.max(newest, date.getTime());
@@ -913,7 +1096,10 @@ function load() {
       }
     }
     items.sort((left, right) => right.date.getTime() - left.date.getTime());
-    writeState({ signature: feedSignature, loadedAt: Date.now(), lastSeenAt: newest, ids: ids.slice(0, MAX_STORED_IDS) });
-    processResults(items, true);
+    const retained = ids.concat((modeState.ids || []).filter(id => !seen[id])).slice(0, MAX_STORED_IDS);
+    return embedItemAvatars(items).then(() => {
+      writeModeState(feedSignature, { lastSeenAt: newest, ids: retained });
+      processResults(items, true);
+    });
   }).catch(handleError);
 }

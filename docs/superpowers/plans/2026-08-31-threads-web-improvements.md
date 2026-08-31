@@ -4,6 +4,8 @@
 
 **Goal:** Close the Loom UX gap between `local.threads.web` and sibling X/Instagram connectors while staying cookie-read-first and Following-safe.
 
+**Status (2026-08-31):** Phases 0–2 + 3.1–3.3 + 4 packaging shipped through **v0.6.0**. Remaining: live Loom cookie-write spike (use optional Bearer only if cookies fail); Phase 3.4 Following timeline endpoint still deferred.
+
 **Architecture:** Keep Following (REST merge) as the default path. Layer presentation, packaging, diagnostics, then optional engagement actions (writes need endpoints that work with web cookies — spike first).
 
 **Tech stack:** Plain Tapestry plugin JS, existing mocked VM tests, Loom review gate.
