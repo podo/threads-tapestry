@@ -19,9 +19,10 @@ Treat cookie values as account credentials. Do not share them or commit them.
 
 ## Item support
 
-Text (with linked URLs, mentions, hashtags), images, GIFs, video with posters,
-carousels, link preview cards, quotes, reposts, and replies. Content warnings
-only when Threads marks spoiler media.
+Text (blue linked URLs, mentions, hashtags), images, GIFs, video with posters,
+carousels, titled link preview cards, quotes, reposts, replies, and metric
+annotations. Actions: like, save, repost, open in Threads, thread context.
+Content warnings only when Threads marks spoiler media.
 
 ## Packaging
 
@@ -30,4 +31,5 @@ npm test
 npm run build
 ```
 
-Installable archive: `dist/Threads.tapestry`.
+Installable archive: `dist/Threads.tapestry` (includes actions / discovery /
+suggestions / apps).

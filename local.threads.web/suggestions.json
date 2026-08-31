@@ -1,0 +1,14 @@
+{
+  "variables": [
+    {
+      "name": "feed_kind",
+      "value": "following",
+      "title": "Following"
+    },
+    {
+      "name": "feed_kind",
+      "value": "for_you",
+      "title": "For You"
+    }
+  ]
+}

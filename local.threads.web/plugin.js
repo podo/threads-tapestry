@@ -9,6 +9,17 @@ const GRAPHQL_PATH = "/api/graphql/";
 const READ_USER_AGENT = "Barcelona 289.0.0.14.109 Android";
 const THREADS_APP_ID = "238260118697367";
 const DEFAULT_GRAPHQL_VARIABLES = { first: 25, after: "__CURSOR__", scale: 2 };
+const connectorBuildId = "2026-08-31T20:15Z-links-actions";
+const connectorPluginVersion = 7;
+const connectorRelease = "0.5.0";
+
+function connectorStamp() {
+  return `${connectorBuildId}@plugin${connectorPluginVersion}@${connectorRelease}`;
+}
+
+function logBuild(stage) {
+  try { console.log(`threads-web ${stage} ${connectorStamp()}`); } catch (_) { /* Loom console optional */ }
+}
 
 function stringValue(value) {
   return value == null ? "" : String(value);
@@ -38,24 +49,77 @@ function safeUrl(value) {
   return "";
 }
 
-function textBody(value) {
-  let html = escapeHtml(value).replace(/\r?\n/g, "<br>");
-  if (!html) return "";
+function looksLikeHttpUrl(value) {
+  return /^(?:https?:\/\/|www\.)[^\s<>"']+/i.test(stringValue(value).trim());
+}
+
+function trimUrlPunctuation(raw) {
+  let label = stringValue(raw);
+  let trailing = "";
+  while (/[),.!?;:]$/.test(label)) {
+    trailing = label.slice(-1) + trailing;
+    label = label.slice(0, -1);
+  }
+  return { label, trailing };
+}
+
+function linkifyInline(escapedHtml) {
+  let html = stringValue(escapedHtml);
   html = html.replace(/(^|[\s(])((?:https?:\/\/|www\.)[^\s<]+)/gi, (whole, prefix, raw) => {
-    let label = raw;
-    let trailing = "";
-    while (/[),.!?;:]$/.test(label)) {
-      trailing = label.slice(-1) + trailing;
-      label = label.slice(0, -1);
-    }
-    const href = safeUrl(label.replace(/&amp;/g, "&").replace(/&#39;/g, "'"));
-    return href ? `${prefix}<a href="${escapeHtml(href)}">${label}</a>${trailing}` : whole;
+    const trimmed = trimUrlPunctuation(raw);
+    const href = safeUrl(trimmed.label.replace(/&amp;/g, "&").replace(/&#39;/g, "'"));
+    if (!href || !looksLikeHttpUrl(trimmed.label.replace(/&amp;/g, "&"))) return whole;
+    return `${prefix}<a href="${escapeHtml(href)}">${trimmed.label}</a>${trimmed.trailing}`;
   });
   html = html.replace(/(^|[\s(])@([A-Za-z0-9._]+)/g, (whole, prefix, handle) =>
     `${prefix}<a href="https://www.threads.com/@${encodeURIComponent(handle)}">@${escapeHtml(handle)}</a>`);
   html = html.replace(/(^|[\s(])#([^\s<#]+)/g, (whole, prefix, tag) =>
     `${prefix}<a href="https://www.threads.com/search?q=${encodeURIComponent("#" + tag)}&serp_type=tags">#${escapeHtml(tag)}</a>`);
-  return `<p>${html}</p>`;
+  // Final pass: wrap leftover plain https://; skip open tags and existing <a> bodies.
+  html = html.replace(/https?:\/\/[^\s<]+/gi, (match, offset, full) => {
+    const preceding = full.slice(0, offset);
+    if (preceding.lastIndexOf("<") > preceding.lastIndexOf(">")) return match;
+    const lastOpen = preceding.lastIndexOf("<a ");
+    const lastClose = preceding.lastIndexOf("</a>");
+    if (lastOpen > lastClose) return match;
+    const trimmed = trimUrlPunctuation(match);
+    const href = safeUrl(trimmed.label);
+    if (!href) return match;
+    return `<a href="${escapeHtml(href)}">${trimmed.label}</a>${trimmed.trailing}`;
+  });
+  return html;
+}
+
+function textBody(value) {
+  const text = stringValue(value).trim();
+  if (!text) return "";
+  let caption = text;
+  let trailingUrl = "";
+  const trailing = text.match(/^(.*?)(?:\s+)((?:https?:\/\/|www\.)[^\s]+)$/s);
+  if (trailing) {
+    const candidate = trimUrlPunctuation(trailing[2]);
+    if (safeUrl(candidate.label)) {
+      caption = trailing[1].trim();
+      trailingUrl = candidate.label + candidate.trailing;
+    }
+  }
+  const parts = [];
+  if (caption) {
+    const linked = linkifyInline(escapeHtml(caption).replace(/\r?\n/g, "<br>"));
+    parts.push(`<p class="service-caption"><small>${linked}</small></p>`);
+  }
+  if (trailingUrl) {
+    const trimmed = trimUrlPunctuation(trailingUrl);
+    const href = safeUrl(trimmed.label);
+    if (href) parts.push(`<p><a href="${escapeHtml(href)}">${escapeHtml(trimmed.label)}</a>${escapeHtml(trimmed.trailing)}</p>`);
+  }
+  const html = parts.join("") || `<p class="service-caption"><small>${linkifyInline(escapeHtml(text).replace(/\r?\n/g, "<br>"))}</small></p>`;
+  return `${html}<!-- ${escapeHtml(connectorStamp())} -->`;
+}
+
+function urlHost(url) {
+  const match = stringValue(url).match(/^https?:\/\/([^/?#]+)/i);
+  return match ? match[1].replace(/^www\./i, "") : "";
 }
 
 function parseJsonChunks(body) {
@@ -175,6 +239,11 @@ function variablesFor(cursor) {
 function restGet(auth, path, query) {
   const url = `${site}${path}${query ? `?${query}` : ""}`;
   return sendRequest(url, "GET", null, requestHeaders(auth), true).then(parseFullResponse);
+}
+
+function restPost(auth, path, body) {
+  return sendRequest(`${site}${path}`, "POST", body, requestHeaders(auth, "application/x-www-form-urlencoded"), true)
+    .then(parseFullResponse);
 }
 
 function requestGraphqlPage(auth, cursor) {
@@ -337,9 +406,15 @@ function makeLinkAttachment(post) {
   const siteName = firstValue(preview, ["siteName", "site_name", "displayUrl", "display_url", "domain"]);
   let image = firstValue(preview, ["imageUrl", "image_url", "image", "thumbnailUrl", "thumbnail_url"]);
   if (image && typeof image === "object") image = firstValue(image, ["url", "uri"]);
-  if (title) link.title = title;
+  if (!safeUrl(image)) {
+    const media = makeMedia(post);
+    if (media && media.mimeType !== "video/mp4") image = media.url;
+    else if (media && media.thumbnail) image = media.thumbnail;
+  }
+  link.title = stringValue(title || siteName || urlHost(url) || url);
   if (description) link.subtitle = description;
   if (siteName) link.siteName = siteName;
+  else if (urlHost(url)) link.siteName = urlHost(url);
   if (safeUrl(image)) link.image = safeUrl(image);
   const aspect = dimensionsFor(preview);
   if (aspect) link.aspectSize = aspect;
@@ -427,6 +502,58 @@ function createAnnotation(text, uri, icon) {
   return value;
 }
 
+function mediaIdForPost(post) {
+  return stringValue(firstValue(post, ["pk", "id", "media_id", "mediaId", "fbid"]));
+}
+
+function booleanFlag(post, names) {
+  for (const name of names) {
+    if (post && post[name] === true) return true;
+    if (post && post[name] === false) return false;
+  }
+  return false;
+}
+
+function actionPayload(post, uri) {
+  return JSON.stringify({ id: mediaIdForPost(post), uri: uri || "" });
+}
+
+function actionsForPost(post, uri, bodyHtml) {
+  const actions = {};
+  const id = mediaIdForPost(post);
+  const payload = actionPayload(post, uri);
+  if (id) {
+    actions[booleanFlag(post, ["has_liked", "hasLiked", "viewer_has_liked"]) ? "unlike" : "like"] = payload;
+    actions[booleanFlag(post, ["has_viewer_saved", "saved", "viewer_has_saved"]) ? "unsave" : "save"] = payload;
+    actions[booleanFlag(post, ["has_viewer_reposted", "viewer_has_reposted", "is_reposted"]) ? "unrepost" : "repost"] = payload;
+    actions.thread = payload;
+  }
+  if (uri) actions.openLink = payload;
+  actions._connectorBuild = connectorStamp();
+  actions._bodyAnchorCount = stringValue(bodyHtml).split("<a ").length - 1;
+  return actions;
+}
+
+function metricAnnotations(post) {
+  const annotations = [];
+  const likes = Number(firstValue(post, ["like_count", "likeCount", "likes"]) || 0);
+  const replies = Number(firstValue(post, ["reply_count", "replyCount", "comment_count"]) || firstValue(appInfo(post), ["direct_reply_count", "reply_count"]) || 0);
+  const reposts = Number(firstValue(post, ["repost_count", "repostCount", "reshare_count"]) || firstValue(appInfo(post), ["repost_count"]) || 0);
+  if (likes > 0) {
+    const value = createAnnotation(`${likes} likes`);
+    if (value) annotations.push(value);
+  }
+  if (replies > 0) {
+    const value = createAnnotation(`${replies} replies`);
+    if (value) annotations.push(value);
+  }
+  if (reposts > 0) {
+    const value = createAnnotation(`${reposts} reposts`);
+    if (value) annotations.push(value);
+  }
+  return annotations;
+}
+
 function postToItem(post, depth) {
   if (!post || depth > 1) return null;
   const originalRepost = nestedPost(post, ["repostedPost", "reposted_post", "repost"]);
@@ -438,7 +565,6 @@ function postToItem(post, depth) {
   const item = Item.createWithUriDate(uri, date);
   const body = textBody(postText(sourcePost));
   if (body) item.body = body;
-  item.author = identityForUser(sourceUser);
   const attachments = mediaAttachments(sourcePost);
   const quote = nestedPost(sourcePost, ["quotedPost", "quoted_post", "quoted_post_media"]);
   if (quote) {
@@ -458,11 +584,129 @@ function postToItem(post, depth) {
     const annotation = createAnnotation(`Replying to ${usernameForUser(parentUser) || nameForUser(parentUser)}`, uriForUser(parentUser), avatarForUser(parentUser));
     if (annotation) annotations.push(annotation);
   }
+  for (const metric of metricAnnotations(sourcePost)) annotations.push(metric);
   if (annotations.length) item.annotations = annotations;
+  if (depth === 0) item.actions = actionsForPost(sourcePost, uri, body);
   if (post.isSpoilerMedia || post.is_spoiler_media || post.contentWarning || post.content_warning) {
     item.contentWarning = post.contentWarning || post.content_warning || "Spoiler";
   }
+  // Assign author last — Loom identity quirks (X lesson).
+  item.author = identityForUser(sourceUser);
   return item;
+}
+
+function parseActionValue(actionValue) {
+  if (actionValue && typeof actionValue === "object") return actionValue;
+  const raw = stringValue(actionValue).trim();
+  if (!raw) return {};
+  try { return JSON.parse(raw) || {}; } catch (_) {
+    return looksLikeHttpUrl(raw) ? { uri: raw } : { id: raw };
+  }
+}
+
+function actionPaths(actionId, mediaId) {
+  const id = encodeURIComponent(mediaId);
+  const map = {
+    like: [`/api/v1/web/likes/${id}/like/`, `/api/v1/media/${id}/like/`],
+    unlike: [`/api/v1/web/likes/${id}/unlike/`, `/api/v1/media/${id}/unlike/`],
+    save: [`/api/v1/web/save/${id}/save/`, `/api/v1/media/${id}/save/`],
+    unsave: [`/api/v1/web/save/${id}/unsave/`, `/api/v1/media/${id}/unsave/`],
+    repost: [`/api/v1/web/media/${id}/repost/`, `/api/v1/media/${id}/repost/`],
+    unrepost: [`/api/v1/web/media/${id}/unrepost/`, `/api/v1/media/${id}/unrepost/`]
+  };
+  return map[actionId] || [];
+}
+
+function performMediaAction(auth, actionId, mediaId) {
+  const paths = actionPaths(actionId, mediaId);
+  if (!paths.length) return Promise.reject(new Error(`Unsupported Threads action: ${actionId}`));
+  const params = `_csrftoken=${encodeURIComponent(auth.csrftoken)}`;
+  function tryAt(index) {
+    if (index >= paths.length) {
+      return Promise.reject(new Error(`Threads could not ${actionId}. Cookie session may be read-only for writes.`));
+    }
+    return restPost(auth, paths[index], params).catch(error => {
+      if (error && /HTTP 404/.test(stringValue(error.message))) return tryAt(index + 1);
+      throw error;
+    });
+  }
+  return tryAt(0);
+}
+
+function toggleRemoteAction(item, actionId) {
+  if (!item) return item;
+  const replacements = {
+    like: "unlike",
+    unlike: "like",
+    save: "unsave",
+    unsave: "save",
+    repost: "unrepost",
+    unrepost: "repost"
+  };
+  const replacement = replacements[actionId];
+  if (!replacement) return item;
+  const actions = Object.assign({}, item.actions || {});
+  const payload = actions[actionId] || actions[replacement] || actionPayload({ pk: mediaIdFromActions(actions) }, item.uri);
+  delete actions[actionId];
+  actions[replacement] = payload;
+  actions._connectorBuild = connectorStamp();
+  item.actions = actions;
+  return item;
+}
+
+function mediaIdFromActions(actions) {
+  for (const key of ["like", "unlike", "save", "unsave", "repost", "unrepost", "thread"]) {
+    const value = parseActionValue(actions && actions[key]);
+    if (value.id) return value.id;
+  }
+  return "";
+}
+
+function loadThreadItems(auth, mediaId, item) {
+  const paths = [
+    `/api/v1/text_feed/${encodeURIComponent(mediaId)}/replies/`,
+    `/api/v1/media/${encodeURIComponent(mediaId)}/comments/`
+  ];
+  function tryAt(index) {
+    if (index >= paths.length) return Promise.resolve(item ? [item] : []);
+    return restGet(auth, paths[index], "count=20").then(page => {
+      const replies = flattenPage(page).map(post => postToItem(post, 0)).filter(Boolean);
+      if (!item) return replies;
+      return [item].concat(replies.filter(reply => reply.uri !== item.uri));
+    }).catch(() => tryAt(index + 1));
+  }
+  return tryAt(0);
+}
+
+function performAction(actionId, actionValue, item) {
+  performActionAsync(actionId, actionValue, item)
+    .then(result => {
+      if (typeof actionComplete === "function") actionComplete(result, null);
+    })
+    .catch(error => {
+      if (error && error.authorization && typeof raiseCondition === "function") {
+        raiseCondition("authorize", "Threads web session expired", "Sign in again, paste fresh sessionid and csrftoken, and update the connector.");
+      }
+      if (typeof actionComplete === "function") actionComplete(null, error);
+      else if (typeof processError === "function") processError(error);
+    });
+}
+
+function performActionAsync(actionId, actionValue, item) {
+  if (actionId === "openLink") return Promise.resolve(item);
+  let auth;
+  try { auth = credentials(); } catch (error) { return Promise.reject(error); }
+  const value = parseActionValue(actionValue);
+  const mediaId = stringValue(value.id || value.mediaId || value.pk);
+  if (actionId === "thread") {
+    if (!mediaId) return Promise.reject(new Error("Could not determine the Threads post ID for this thread."));
+    return loadThreadItems(auth, mediaId, item);
+  }
+  if (["like", "unlike", "save", "unsave", "repost", "unrepost"].indexOf(actionId) < 0) {
+    return Promise.reject(new Error(`Unsupported Threads action: ${actionId}`));
+  }
+  if (!mediaId) return Promise.reject(new Error(`Could not determine the Threads media ID for ${actionId}.`));
+  return performMediaAction(auth, actionId, mediaId).then(() => toggleRemoteAction(item, actionId));
 }
 
 function looksLikePost(value) {
@@ -626,6 +870,7 @@ function handleError(error) {
 }
 
 function verify() {
+  logBuild("verify");
   let auth;
   try { auth = credentials(); } catch (error) { processError(error); return; }
   currentUser(auth).then(user => {
@@ -639,6 +884,7 @@ function verify() {
 }
 
 function load() {
+  logBuild("load");
   let auth;
   try { auth = credentials(); } catch (error) { processError(error); return; }
   const state = readState();

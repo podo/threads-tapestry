@@ -58,6 +58,16 @@ function postsFixture() {
       }
     },
     {
+      pk: "media-link-1", code: "media-link-1", taken_at: 1788087350, user: user("erin", "Erin Example", "5"),
+      caption: { text: "Photo plus article https://news.example/photo-story" },
+      image_versions2: { candidates: [{ url: "https://cdn.example/media-link.jpg", width: 1200, height: 800 }] },
+      text_post_app_info: {
+        link_preview_attachment: {
+          url: "https://news.example/photo-story", display_url: "news.example"
+        }
+      }
+    },
+    {
       pk: "quote-1", code: "quote-1", taken_at: 1788087300, user: user("frank", "Frank Example", "6"),
       caption: { text: "Adding context" }, text_post_app_info: { share_info: { quoted_post: {
         pk: "quoted-original", code: "quoted-original", taken_at: 1788080000, user: user("grace", "Grace Example", "7"),
@@ -96,12 +106,23 @@ function graphqlFixture() {
   };
 }
 
-function restRouter(url) {
+function restRouter(url, method = "GET") {
+  if (method === "POST" && /\/(web\/likes|web\/save|web\/media|media\/[^/]+\/(like|unlike|save|unsave|repost|unrepost))\//.test(url)) {
+    return fullResponse({ status: "ok" });
+  }
   if (url.indexOf("/api/v1/accounts/current_user/") >= 0) {
     return fullResponse({ user: user("alice", "Alice Example", "1") });
   }
   if (url.indexOf("/friendships/1/following/") >= 0) {
     return fullResponse({ users: [user("bob", "Bob Example", "2"), user("carol", "Carol Example", "3")] });
+  }
+  if (url.indexOf("/text_feed/") >= 0 && url.indexOf("/replies/") >= 0) {
+    return fullResponse({
+      threads: [{ thread_items: [{ post: {
+        pk: "reply-thread-1", code: "reply-thread-1", taken_at: 1788088000,
+        user: user("bob", "Bob Example", "2"), caption: { text: "A thread reply" }
+      } }] }]
+    });
   }
   if (url.indexOf("/text_feed/") >= 0 && url.indexOf("/profile/") >= 0) {
     const id = (url.match(/text_feed\/([^/]+)\//) || [])[1];
@@ -135,11 +156,12 @@ function makeContext(overrides = {}) {
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
       context.requests.push({ url, method, params, headers, fullResponseRequested });
       if (url.indexOf("/api/graphql") >= 0) return fullResponse(graphqlFixture());
-      return restRouter(url);
+      return restRouter(url, method);
     },
     processVerification: value => { context.verification = value; },
     processResults: (value, complete) => { context.results = value; context.complete = complete; },
     processError: error => { context.error = error; },
+    actionComplete: (value, error) => { context.actionResult = value; context.actionError = error; },
     raiseCondition: (kind, title, description) => { context.condition = { kind, title, description }; },
     getItem: key => state.get(key) || null,
     setItem: (key, value) => state.set(key, value),
@@ -192,7 +214,7 @@ async function run() {
   await settle();
   assert.ifError(context.error);
   assert.strictEqual(context.complete, true);
-  assert.ok(context.results.length >= 7, "following merge returns media variants");
+  assert.ok(context.results.length >= 8, "following merge returns media variants");
   assert.ok(context.requests.every(request => request.url.indexOf("/api/graphql") < 0), "Following must not require GraphQL");
   assert.match(context.requests[0].headers.Cookie, /sessionid=1%3Aabc/);
   assert.match(context.requests[0].headers.Cookie, /csrftoken=fixture-csrf/);
@@ -203,9 +225,18 @@ async function run() {
   const text = byUri("text-1");
   assert.strictEqual(text.author.name, "Alice Example");
   assert.strictEqual(text.author.username, "@alice");
-  assert.match(text.body, /@bob/);
-  assert.match(text.body, /#threads/);
-  assert.match(text.body, /https:\/\/example.com\/read/);
+  assert.match(text.body, /<a href="https:\/\/www\.threads\.com\/@bob">@bob<\/a>/);
+  assert.match(text.body, /<a href="[^"]*threads[^"]*">#threads<\/a>/);
+  assert.match(text.body, /<a href="https:\/\/example\.com\/read">/);
+  assert.match(text.body, /service-caption/);
+  assert.match(text.body, /<!-- .*@plugin7@0\.5\.0 -->/);
+  assert.ok(text.actions.like);
+  assert.ok(text.actions.save);
+  assert.ok(text.actions.repost);
+  assert.ok(text.actions.thread);
+  assert.ok(text.actions.openLink);
+  assert.match(text.actions._connectorBuild, /@plugin7@0\.5\.0/);
+  assert.ok(text.actions._bodyAnchorCount >= 3);
 
   const image = byUri("image-1").attachments[0];
   assert.strictEqual(image.url, "https://cdn.example/image-large.jpg");
@@ -224,6 +255,12 @@ async function run() {
   assert.strictEqual(link.title, "The rendered story");
   assert.strictEqual(link.image, "https://cdn.example/link-card.jpg");
 
+  const mediaLink = byUri("media-link-1");
+  assert.strictEqual(mediaLink.attachments[0].url, "https://cdn.example/media-link.jpg");
+  assert.strictEqual(mediaLink.attachments[1].title, "news.example");
+  assert.strictEqual(mediaLink.attachments[1].url, "https://news.example/photo-story");
+  assert.match(mediaLink.body, /<a href="https:\/\/news\.example\/photo-story">/);
+
   const quote = byUri("quote-1");
   assert.ok(quote.attachments.some(item => item.author && item.author.name === "Grace Example"));
 
@@ -233,6 +270,22 @@ async function run() {
 
   const spoiler = byUri("spoiler-1");
   assert.strictEqual(spoiler.contentWarning, "Spoiler");
+
+  context.__actionItem = Object.assign({}, text, { actions: Object.assign({}, text.actions) });
+  vm.runInContext('performAction("like", __actionItem.actions.like, __actionItem)', context);
+  await settle();
+  assert.ifError(context.actionError);
+  assert.ok(context.actionResult.actions.unlike);
+  assert.ok(!context.actionResult.actions.like);
+  assert.ok(context.requests.some(request => request.method === "POST" && /\/like\/$/.test(request.url)));
+
+  context.actionResult = null;
+  context.actionError = null;
+  vm.runInContext('performAction("thread", __actionItem.actions.thread, __actionItem)', context);
+  await settle();
+  assert.ifError(context.actionError);
+  assert.ok(Array.isArray(context.actionResult));
+  assert.ok(context.actionResult.length >= 2);
 
   const emptyDoc = makeContext({ query_doc_id: "" });
   vm.runInContext("load()", emptyDoc);
@@ -250,7 +303,7 @@ async function run() {
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
       forYou.requests.push({ url, method, params, headers, fullResponseRequested });
       if (url.indexOf("/api/graphql") >= 0) return fullResponse(graphqlFixture());
-      return restRouter(url);
+      return restRouter(url, method);
     },
     requests: []
   });

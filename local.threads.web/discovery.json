@@ -1,0 +1,15 @@
+{
+  "input": [
+    {
+      "match": "/^@([a-zA-Z0-9._]{1,30})$/",
+      "url": "https://www.threads.com/@$1"
+    }
+  ],
+  "sites": [
+    "threads.com",
+    "www.threads.com",
+    "threads.net",
+    "www.threads.net"
+  ],
+  "url": []
+}

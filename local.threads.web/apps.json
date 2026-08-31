@@ -1,0 +1,10 @@
+{
+  "apps": [
+    {
+      "id": "com.burbn.barcelona",
+      "name": "Threads",
+      "template": "__URL__",
+      "pattern": "https://(?:www\\.)?threads\\.(?:com|net)"
+    }
+  ]
+}

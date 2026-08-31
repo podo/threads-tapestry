@@ -1,0 +1,45 @@
+{
+  "items": [
+    {
+      "id": "like",
+      "name": "Like",
+      "icon": "heart"
+    },
+    {
+      "id": "unlike",
+      "name": "Liked",
+      "icon": "heart.fill"
+    },
+    {
+      "id": "save",
+      "name": "Save",
+      "icon": "tapestry.bookmark"
+    },
+    {
+      "id": "unsave",
+      "name": "Saved",
+      "icon": "tapestry.bookmark.fill"
+    },
+    {
+      "id": "repost",
+      "name": "Repost",
+      "icon": "tapestry.boost"
+    },
+    {
+      "id": "unrepost",
+      "name": "Reposted",
+      "icon": "tapestry.boost.fill"
+    },
+    {
+      "id": "openLink",
+      "name": "Open in Threads",
+      "icon": "tapestry.open.original"
+    },
+    {
+      "id": "thread",
+      "name": "Thread",
+      "icon": "bubble.left.and.bubble.right",
+      "role": "context"
+    }
+  ]
+}
