@@ -11,9 +11,9 @@ const GRAPHQL_PATH = "/api/graphql/";
 const READ_USER_AGENT = "Barcelona 289.0.0.14.109 Android";
 const THREADS_APP_ID = "238260118697367";
 const DEFAULT_GRAPHQL_VARIABLES = { first: 25, after: "__CURSOR__", scale: 2 };
-const connectorBuildId = "2026-08-31T21:40Z-card-order";
-const connectorPluginVersion = 9;
-const connectorRelease = "0.7.0";
+const connectorBuildId = "2026-08-31T21:45Z-feed-label";
+const connectorPluginVersion = 10;
+const connectorRelease = "0.7.1";
 
 let avatarDataUrlCache = null;
 
@@ -270,6 +270,10 @@ function parseFullResponse(text) {
 function feedKind() {
   const value = stringValue(typeof feed_kind === "undefined" ? "following" : feed_kind).toLowerCase().replace(/\s+/g, "_");
   return value === "for_you" || value === "foryou" ? "for_you" : "following";
+}
+
+function sourceLabel() {
+  return feedKind() === "for_you" ? "For You" : "Following";
 }
 
 function credentials() {
@@ -1136,9 +1140,9 @@ function verify() {
   let auth;
   try { auth = credentials(); } catch (error) { processError(error); return; }
   currentUser(auth).then(user => {
-    const handle = usernameForUser(user);
+    // Loom chrome: Service · Feed Type (author @handle lives on item.author, not here).
     const verification = {
-      displayName: handle ? `Threads · @${handle}` : "Threads",
+      displayName: `Threads · ${sourceLabel()}`,
       accountIdentity: identityForUser(user)
     };
     processVerification(verification);

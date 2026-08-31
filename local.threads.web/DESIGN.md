@@ -25,19 +25,13 @@ empty text accepted by `verify()` / `load()` without throwing.
 
 ## Item information architecture
 
-Card chrome order (Loom `post` style), matching X:
+Card chrome order (Loom `post` style):
 
-1. Native annotations **only** for `Reposted by @handle` / `Reply to @handle` (above Service).
-2. Service → Author.
-3. Body meta first: external link host, then metrics in
-   `<p class="threads-meta-metrics"><small>…</small></p>` when **Show Metrics** is on.
-4. Caption as normal `<p>` with linked URLs, `@mentions`, `#hashtags`; article URLs in
-   their own `<p><a>` blocks.
-5. Attachments under body: media → poll → titled link card → quoted item.
-6. Actions: like / save / repost toggles also update the body metrics line;
-   open in Threads; thread context.
-7. Author identity assigned last; avatars embedded as data URLs when CDN fetch works.
-8. `contentWarning` only from explicit spoiler flags.
+1. Native annotations: `Reposted by @handle` / `Reply to @handle` only (above Service).
+2. Service · Feed Type via verify `displayName` (`Threads · Following` / `Threads · For You`).
+3. Author: display name + `@handle` on `item.author` (assigned last).
+4. Body meta (host + metrics) → caption → URL paragraphs → attachments
+   (media → poll → link → quote) → actions.
 
 Native Tapestry attachments may render under the HTML body; that is an API limitation.
 

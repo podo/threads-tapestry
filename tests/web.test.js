@@ -217,7 +217,7 @@ async function run() {
   vm.runInContext("verify()", context);
   await settle();
   assert.ifError(context.error);
-  assert.strictEqual(context.verification.displayName, "Threads · @alice");
+  assert.strictEqual(context.verification.displayName, "Threads · Following");
   assert.strictEqual(context.verification.icon, undefined);
   assert.deepStrictEqual(
     JSON.parse(JSON.stringify(context.verification.accountIdentity)),
@@ -245,13 +245,13 @@ async function run() {
   assert.match(text.body, /<a href="[^"]*threads[^"]*">#threads<\/a>/);
   assert.match(text.body, /<a href="https:\/\/example\.com\/read">/);
   assert.match(text.body, /threads-meta-host/);
-  assert.match(text.body, /<!-- .*@plugin9@0\.7\.0 -->/);
+  assert.match(text.body, /<!-- .*@plugin10@0\.7\.1 -->/);
   assert.ok(text.actions.like);
   assert.ok(text.actions.save);
   assert.ok(text.actions.repost);
   assert.ok(text.actions.thread);
   assert.ok(text.actions.openLink);
-  assert.match(text.actions._connectorBuild, /@plugin9@0\.7\.0/);
+  assert.match(text.actions._connectorBuild, /@plugin10@0\.7\.1/);
   assert.ok(text.actions._bodyAnchorCount >= 3);
   assert.match(text.author.avatar, /^data:image\/jpeg;base64,/);
   assert.match(text.actions._authorAvatarAssigned, /^data:/);
@@ -407,6 +407,7 @@ async function run() {
   vm.runInContext("verify()", forYou);
   await settle();
   assert.ifError(forYou.error);
+  assert.strictEqual(forYou.verification.displayName, "Threads · For You");
   vm.runInContext("load()", forYou);
   await settle();
   assert.ifError(forYou.error);

@@ -16,7 +16,7 @@ async function run() {
   const actions = JSON.parse(execFileSync("unzip", ["-p", archive, "actions.json"], { encoding: "utf8" }));
   assert.strictEqual(config.id, "local.threads.web");
   assert.strictEqual(config.display_name, "Threads");
-  assert.strictEqual(config.version, 9);
+  assert.strictEqual(config.version, 10);
   assert.ok(ui.inputs.some(input => input.name === "show_metrics"));
   assert.ok(ui.inputs.some(input => input.name === "following_account_cap"));
   assert.ok(ui.inputs.some(input => input.name === "authorization_bearer"));

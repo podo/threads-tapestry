@@ -19,7 +19,7 @@ unzip -t Threads.tapestry
 unzip -l Threads.tapestry
 ```
 
-Expect `plugin-config.json` `version` **9** for this release and
+Expect `plugin-config.json` `version` **10** for this release and
 `actions` / `discovery` / `suggestions` / `apps` / `TESTING.md` in the archive.
 
 ## Loom review checklist
@@ -29,10 +29,11 @@ Install [v0.6.0 `Threads.tapestry`](https://github.com/podo/threads-tapestry/rel
 
 ### Reload proof
 
-1. Console on Verify/Load: `threads-web … @plugin9@0.7.0`
-2. Any item: `actions._connectorBuild` and body HTML comment match that stamp
-3. Body starts with optional `threads-meta-host` then `threads-meta-metrics` (when metrics on), then caption
-4. `actions._authorAvatarAssigned` is `data:N` when embed worked, or `url:host` fallback
+1. Console on Verify/Load: `threads-web … @plugin10@0.7.1`
+2. Verify display name is `Threads · Following` or `Threads · For You` (not `@handle`)
+3. Any item: `actions._connectorBuild` and body HTML comment match that stamp
+4. Body starts with optional `threads-meta-host` then `threads-meta-metrics` (when metrics on), then caption
+5. `actions._authorAvatarAssigned` is `data:N` when embed worked, or `url:host` fallback
 
 ### Presentation (links → post → actions)
 
