@@ -10,10 +10,10 @@ Single cookie-authenticated Threads connector for Tapestry. Default feed is
 |-------|----------|--------|
 | sessionid | yes | Application → Cookies |
 | csrftoken | yes | Application → Cookies |
-| ds_user_id | optional | Derived from sessionid if blank |
-| mid / ig_did | optional | Empty accepted |
+| ds_user_id | optional | Can be left blank (derived from sessionid when empty) |
+| mid / ig_did | optional | Can be left blank |
 | Feed | choices | `following` (default) or `for_you` |
-| Home-feed doc_id | optional | Only for For You; empty is fine on Following |
+| Home-feed doc_id | optional | Can be left blank; needed only for For You |
 | Include reposts / quotes / replies | switches | Defaults: on / on / off |
 | Show Metrics | switch | Default on |
 | Following Account Cap | choices | 8 / 12 / 20 / 40 (default 12) |

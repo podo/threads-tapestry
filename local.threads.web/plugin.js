@@ -11,9 +11,9 @@ const GRAPHQL_PATH = "/api/graphql/";
 const READ_USER_AGENT = "Barcelona 289.0.0.14.109 Android";
 const THREADS_APP_ID = "238260118697367";
 const DEFAULT_GRAPHQL_VARIABLES = { first: 25, after: "__CURSOR__", scale: 2 };
-const connectorBuildId = "2026-08-31T21:48Z-bearer-label";
-const connectorPluginVersion = 11;
-const connectorRelease = "0.7.2";
+const connectorBuildId = "2026-08-31T21:50Z-optional-blank";
+const connectorPluginVersion = 12;
+const connectorRelease = "0.7.3";
 
 let avatarDataUrlCache = null;
 

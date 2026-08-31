@@ -16,19 +16,19 @@
       "name": "ds_user_id",
       "type": "text",
       "prompt": "ds_user_id (optional)",
-      "placeholder": "Leave blank to derive from sessionid"
+      "placeholder": "Can be left blank"
     },
     {
       "name": "mid",
       "type": "text",
       "prompt": "mid (optional)",
-      "placeholder": "Optional"
+      "placeholder": "Can be left blank"
     },
     {
       "name": "ig_did",
       "type": "text",
       "prompt": "ig_did (optional)",
-      "placeholder": "Optional"
+      "placeholder": "Can be left blank"
     },
     {
       "name": "feed_kind",
@@ -40,8 +40,8 @@
     {
       "name": "query_doc_id",
       "type": "text",
-      "prompt": "Home-feed doc_id (For You only)",
-      "placeholder": "Leave blank for Following; required only for For You"
+      "prompt": "Home-feed doc_id (optional)",
+      "placeholder": "Can be left blank"
     },
     {
       "name": "include_reposts",

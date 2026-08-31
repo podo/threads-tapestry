@@ -245,13 +245,13 @@ async function run() {
   assert.match(text.body, /<a href="[^"]*threads[^"]*">#threads<\/a>/);
   assert.match(text.body, /<a href="https:\/\/example\.com\/read">/);
   assert.match(text.body, /threads-meta-host/);
-  assert.match(text.body, /<!-- .*@plugin11@0\.7\.2 -->/);
+  assert.match(text.body, /<!-- .*@plugin12@0\.7\.3 -->/);
   assert.ok(text.actions.like);
   assert.ok(text.actions.save);
   assert.ok(text.actions.repost);
   assert.ok(text.actions.thread);
   assert.ok(text.actions.openLink);
-  assert.match(text.actions._connectorBuild, /@plugin11@0\.7\.2/);
+  assert.match(text.actions._connectorBuild, /@plugin12@0\.7\.3/);
   assert.ok(text.actions._bodyAnchorCount >= 3);
   assert.match(text.author.avatar, /^data:image\/jpeg;base64,/);
   assert.match(text.actions._authorAvatarAssigned, /^data:/);
