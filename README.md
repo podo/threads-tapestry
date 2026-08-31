@@ -24,7 +24,7 @@ npm run build
 npm run test:e2e
 ```
 
-Build output: `dist/Threads.tapestry`.
+Build output: `Threads.tapestry` (repo root).
 
 ## Versioning
 

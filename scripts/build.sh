@@ -2,12 +2,10 @@
 set -euo pipefail
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-output_dir="$project_dir/dist"
 connector_dir="$project_dir/local.threads.web"
-output_file="$output_dir/Threads.tapestry"
+output_file="$project_dir/Threads.tapestry"
 temporary_file="$output_file.tmp"
 
-mkdir -p "$output_dir"
 trap 'rm -f "$temporary_file"' EXIT
 
 node -e "JSON.parse(require('fs').readFileSync('$connector_dir/plugin-config.json')); JSON.parse(require('fs').readFileSync('$connector_dir/ui-config.json'));"

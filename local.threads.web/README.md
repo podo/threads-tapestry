@@ -33,4 +33,4 @@ npm test
 npm run build
 ```
 
-Installable archive: `dist/Threads.tapestry`. Loom checklist: `TESTING.md`.
+Installable archive: `Threads.tapestry` (repo root). Loom checklist: `TESTING.md`.

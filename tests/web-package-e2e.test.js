@@ -4,7 +4,7 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 
 async function run() {
-  const archive = path.join(__dirname, "..", "dist", "Threads.tapestry");
+  const archive = path.join(__dirname, "..", "Threads.tapestry");
   assert.ok(fs.existsSync(archive), "build must produce Threads.tapestry");
   execFileSync("unzip", ["-t", archive], { stdio: "pipe" });
   const listed = execFileSync("unzip", ["-l", archive], { encoding: "utf8" });

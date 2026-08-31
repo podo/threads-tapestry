@@ -47,7 +47,7 @@ jobs:
             echo "Release $tag already exists; leaving it unchanged."
           else
             gh release create "$tag" \
-              dist/Threads.tapestry \
+              Threads.tapestry \
               --target "$GITHUB_SHA" \
               --title "$tag" \
               --generate-notes

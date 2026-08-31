@@ -15,8 +15,8 @@ data-URL embed path (mocked), packaging manifests.
 ## Package checks
 
 ```sh
-unzip -t dist/Threads.tapestry
-unzip -l dist/Threads.tapestry
+unzip -t Threads.tapestry
+unzip -l Threads.tapestry
 ```
 
 Expect `plugin-config.json` `version` **8** for this release and
