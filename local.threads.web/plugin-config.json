@@ -1,6 +1,6 @@
 {
   "id": "local.threads.web",
-  "display_name": "Threads Web (Beta)",
+  "display_name": "Threads",
   "service_name": "Threads",
   "default_color": "blue",
   "icon": "https://raw.githubusercontent.com/podo/threads-tapestry/main/assets/threads.png",
@@ -12,5 +12,5 @@
   "provides_attachments": true,
   "synchronizable_credentials": false,
   "minimum_app_version": "1.5",
-  "version": 2
+  "version": 6
 }

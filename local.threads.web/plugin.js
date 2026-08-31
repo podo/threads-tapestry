@@ -1,8 +1,14 @@
 const STATE_KEY = "threadsWebStateV1";
 const MAX_BACKFILL_PAGES = 3;
 const MAX_STORED_IDS = 100;
+const MAX_FOLLOWING = 12;
+const POSTS_PER_FOLLOWING = 8;
+const FOLLOWING_CONCURRENCY = 4;
 const GRAPHQL_PATH = "/api/graphql/";
+// Threads rejects desktop browser UAs on cookie REST with "useragent mismatch".
+const READ_USER_AGENT = "Barcelona 289.0.0.14.109 Android";
 const THREADS_APP_ID = "238260118697367";
+const DEFAULT_GRAPHQL_VARIABLES = { first: 25, after: "__CURSOR__", scale: 2 };
 
 function stringValue(value) {
   return value == null ? "" : String(value);
@@ -45,6 +51,10 @@ function textBody(value) {
     const href = safeUrl(label.replace(/&amp;/g, "&").replace(/&#39;/g, "'"));
     return href ? `${prefix}<a href="${escapeHtml(href)}">${label}</a>${trailing}` : whole;
   });
+  html = html.replace(/(^|[\s(])@([A-Za-z0-9._]+)/g, (whole, prefix, handle) =>
+    `${prefix}<a href="https://www.threads.com/@${encodeURIComponent(handle)}">@${escapeHtml(handle)}</a>`);
+  html = html.replace(/(^|[\s(])#([^\s<#]+)/g, (whole, prefix, tag) =>
+    `${prefix}<a href="https://www.threads.com/search?q=${encodeURIComponent("#" + tag)}&serp_type=tags">#${escapeHtml(tag)}</a>`);
   return `<p>${html}</p>`;
 }
 
@@ -70,7 +80,12 @@ function parseFullResponse(text) {
   try { envelope = JSON.parse(text); } catch (_) { throw new Error("Threads returned an unreadable response."); }
   if (envelope && typeof envelope.status === "number" && Object.prototype.hasOwnProperty.call(envelope, "body")) {
     let body = {};
-    try { body = parseJsonChunks(envelope.body); } catch (_) { body = {}; }
+    try {
+      const raw = stringValue(envelope.body).trim();
+      body = raw ? parseJsonChunks(raw) : {};
+    } catch (_) {
+      try { body = JSON.parse(envelope.body); } catch (__) { body = {}; }
+    }
     if (envelope.status === 401 || envelope.status === 403) {
       const error = new Error("Threads web session expired or was rejected.");
       error.authorization = true;
@@ -78,7 +93,7 @@ function parseFullResponse(text) {
     }
     if (envelope.status < 200 || envelope.status >= 300) {
       const message = firstValue(body.error || {}, ["message", "error_user_msg"]) ||
-        firstValue(body, ["message", "error_message"]) || `HTTP ${envelope.status}`;
+        firstValue(body, ["message", "error_message", "status"]) || `HTTP ${envelope.status}`;
       throw new Error(`Threads web feed: ${message}`);
     }
     if (body && Array.isArray(body.errors) && body.errors.length) {
@@ -92,49 +107,53 @@ function parseFullResponse(text) {
   return envelope || {};
 }
 
-function requiredSetting(name, value) {
-  const result = stringValue(value).trim();
-  if (!result) throw new Error(`Enter the Threads ${name} in connector settings.`);
-  return result;
+function feedKind() {
+  const value = stringValue(typeof feed_kind === "undefined" ? "following" : feed_kind).toLowerCase().replace(/\s+/g, "_");
+  return value === "for_you" || value === "foryou" ? "for_you" : "following";
 }
 
 function credentials() {
+  const sessionId = stringValue(typeof sessionid === "undefined" ? "" : sessionid).trim();
+  const csrfToken = stringValue(typeof csrftoken === "undefined" ? "" : csrftoken).trim();
+  if (!sessionId || !csrfToken) {
+    throw new Error("Enter sessionid and csrftoken from Application → Cookies on threads.com.");
+  }
+  let dsUserId = stringValue(typeof ds_user_id === "undefined" ? "" : ds_user_id).trim();
+  if (!dsUserId) {
+    const match = decodeURIComponent(sessionId).match(/^(\d+)/);
+    if (match) dsUserId = match[1];
+  }
+  if (!dsUserId) throw new Error("Enter ds_user_id, or use a sessionid that starts with your numeric user id.");
   return {
-    sessionid: requiredSetting("sessionid cookie", typeof sessionid === "undefined" ? "" : sessionid),
-    csrftoken: requiredSetting("csrftoken cookie", typeof csrftoken === "undefined" ? "" : csrftoken),
-    ds_user_id: requiredSetting("ds_user_id cookie", typeof ds_user_id === "undefined" ? "" : ds_user_id),
-    mid: requiredSetting("mid cookie", typeof mid === "undefined" ? "" : mid),
-    ig_did: requiredSetting("ig_did cookie", typeof ig_did === "undefined" ? "" : ig_did),
-    rur: stringValue(typeof rur === "undefined" ? "" : rur).trim(),
-    docId: requiredSetting("home-feed GraphQL doc_id", typeof query_doc_id === "undefined" ? "" : query_doc_id)
+    sessionid: sessionId,
+    csrftoken: csrfToken,
+    ds_user_id: dsUserId,
+    mid: stringValue(typeof mid === "undefined" ? "" : mid).trim(),
+    ig_did: stringValue(typeof ig_did === "undefined" ? "" : ig_did).trim(),
+    rur: "",
+    docId: stringValue(typeof query_doc_id === "undefined" ? "" : query_doc_id).trim()
   };
 }
 
 function cookieHeader(auth) {
-  const values = [
-    `sessionid=${auth.sessionid}`,
-    `csrftoken=${auth.csrftoken}`,
-    `ds_user_id=${auth.ds_user_id}`,
-    `mid=${auth.mid}`,
-    `ig_did=${auth.ig_did}`
-  ];
+  const values = [`sessionid=${auth.sessionid}`, `csrftoken=${auth.csrftoken}`, `ds_user_id=${auth.ds_user_id}`];
+  if (auth.mid) values.push(`mid=${auth.mid}`);
+  if (auth.ig_did) values.push(`ig_did=${auth.ig_did}`);
   if (auth.rur) values.push(`rur=${auth.rur}`);
   return values.join("; ");
 }
 
-function requestHeaders(auth) {
+function requestHeaders(auth, contentType) {
   const headers = {
     "Accept": "*/*",
-    "Content-Type": "application/x-www-form-urlencoded",
     "Cookie": cookieHeader(auth),
     "Origin": site,
     "Referer": `${site}/`,
-    "User-Agent": "Mozilla/5.0 AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15",
+    "User-Agent": READ_USER_AGENT,
     "X-CSRFToken": auth.csrftoken,
     "X-IG-App-ID": THREADS_APP_ID
   };
-  const friendlyName = stringValue(typeof query_name === "undefined" ? "" : query_name).trim();
-  if (friendlyName) headers["X-FB-Friendly-Name"] = friendlyName;
+  if (contentType) headers["Content-Type"] = contentType;
   return headers;
 }
 
@@ -150,21 +169,26 @@ function replaceVariables(value, cursor) {
 }
 
 function variablesFor(cursor) {
-  const raw = stringValue(typeof query_variables === "undefined" ? "" : query_variables).trim();
-  let parsed;
-  try { parsed = JSON.parse(raw || "{}"); } catch (_) { throw new Error("Captured variables must be valid JSON."); }
-  return replaceVariables(parsed, cursor);
+  return replaceVariables(JSON.parse(JSON.stringify(DEFAULT_GRAPHQL_VARIABLES)), cursor);
 }
 
-function requestPage(cursor) {
-  const auth = credentials();
+function restGet(auth, path, query) {
+  const url = `${site}${path}${query ? `?${query}` : ""}`;
+  return sendRequest(url, "GET", null, requestHeaders(auth), true).then(parseFullResponse);
+}
+
+function requestGraphqlPage(auth, cursor) {
+  if (!auth.docId) {
+    return Promise.reject(new Error("For You needs a home-feed GraphQL doc_id. Capture it from the Threads Network tab, or switch Feed to Following."));
+  }
   const params = [
     "fb_api_caller_class=RelayModern",
     `variables=${encodeURIComponent(JSON.stringify(variablesFor(cursor)))}`,
     `doc_id=${encodeURIComponent(auth.docId)}`,
     "server_timestamps=true"
   ].join("&");
-  return sendRequest(`${site}${GRAPHQL_PATH}`, "POST", params, requestHeaders(auth), true).then(parseFullResponse);
+  return sendRequest(`${site}${GRAPHQL_PATH}`, "POST", params, requestHeaders(auth, "application/x-www-form-urlencoded"), true)
+    .then(parseFullResponse);
 }
 
 function readState() {
@@ -206,7 +230,7 @@ function nameForUser(user) {
 }
 
 function avatarForUser(user) {
-  const hd = firstValue(user, ["hdProfilePicURL", "hd_profile_pic_url"]);
+  const hd = firstValue(user, ["hdProfilePicURL", "hd_profile_pic_url", "hd_profile_pic_url_info"]);
   if (typeof hd === "string") return hd;
   if (hd && hd.url) return hd.url;
   return firstValue(user, ["profilePicURL", "profile_pic_url", "avatar", "avatar_url"]);
@@ -218,18 +242,19 @@ function uriForUser(user) {
 }
 
 function identityForUser(user) {
+  if (typeof Identity === "undefined" || typeof Identity.createWithName !== "function") return null;
   const name = nameForUser(user);
   const handle = usernameForUser(user);
-  let identity;
-  if (typeof Identity !== "undefined" && typeof Identity.create === "function") {
-    identity = Identity.create(name, handle ? `@${handle}` : null, avatarForUser(user) || null, uriForUser(user));
-  } else if (typeof Identity !== "undefined" && typeof Identity.createWithName === "function") {
-    identity = Identity.createWithName(name);
-    if (handle) identity.username = `@${handle}`;
-    if (avatarForUser(user)) identity.avatar = avatarForUser(user);
-    identity.uri = uriForUser(user);
-  }
+  const identity = Identity.createWithName(name);
+  if (handle) identity.username = `@${handle}`;
+  identity.uri = uriForUser(user);
+  const avatar = avatarForUser(user);
+  if (avatar) identity.avatar = avatar;
   return identity;
+}
+
+function userId(user) {
+  return stringValue(firstValue(user, ["pk", "id", "pk_id", "user_id", "userId"]));
 }
 
 function dimensionsFor(value, fallbackWidth, fallbackHeight) {
@@ -268,10 +293,14 @@ function makeMedia(post) {
   const video = bestVariant(videoVariants(post));
   const image = bestVariant(imageVariants(post));
   const gifUrl = safeUrl(firstValue(post, ["gifUrl", "gif_url"]));
-  const url = gifUrl || mediaUrl(video) || mediaUrl(image) || mediaUrl(post);
+  const audioUrl = safeUrl(firstValue(post, ["audioUrl", "audio_url"]));
+  const url = gifUrl || mediaUrl(video) || audioUrl || mediaUrl(image) || mediaUrl(post);
   if (!url) return null;
   const attachment = MediaAttachment.createWithUrl(url);
-  attachment.mimeType = gifUrl || type.indexOf("gif") >= 0 ? "image/gif" : (video || type.indexOf("video") >= 0 || Number(type) === 2 ? "video/mp4" : "image");
+  if (gifUrl || type.indexOf("gif") >= 0) attachment.mimeType = "image/gif";
+  else if (video || type.indexOf("video") >= 0 || Number(type) === 2) attachment.mimeType = "video/mp4";
+  else if (audioUrl || type.indexOf("audio") >= 0) attachment.mimeType = "audio";
+  else attachment.mimeType = "image";
   const thumb = safeUrl(firstValue(post, ["thumbnail", "thumbnailUrl", "thumbnail_url", "coverUrl", "cover_url"])) || mediaUrl(image);
   if (thumb && attachment.mimeType === "video/mp4") attachment.thumbnail = thumb;
   const aspect = dimensionsFor(post, firstValue(video || image || {}, ["width", "config_width"]), firstValue(video || image || {}, ["height", "config_height"]));
@@ -317,6 +346,21 @@ function makeLinkAttachment(post) {
   return link;
 }
 
+function makePollAttachment(post) {
+  if (typeof PollAttachment === "undefined" || typeof PollAttachment.create !== "function") return null;
+  if (typeof PollOption === "undefined" || typeof PollOption.create !== "function") return null;
+  const poll = firstValue(post, ["poll"]) || firstValue(appInfo(post), ["poll_attachment", "pollAttachment", "poll"]);
+  const options = poll && (poll.options || poll.tallies || poll.choices);
+  if (!Array.isArray(options) || !options.length) return null;
+  const attachment = PollAttachment.create();
+  attachment.options = options.map(option => {
+    const title = stringValue(firstValue(option, ["text", "title", "label", "option"]) || "Option");
+    const votes = Number(firstValue(option, ["count", "votes", "vote_count"]) || 0);
+    return PollOption.create(title, votes);
+  });
+  return attachment;
+}
+
 function shareInfo(post) {
   return firstValue(appInfo(post), ["share_info", "shareInfo"]) || {};
 }
@@ -330,11 +374,11 @@ function nestedPost(post, names) {
 }
 
 function isRepost(post) {
-  return !!nestedPost(post, ["repostedPost", "reposted_post", "repost"] ) || !!post.isRepost || !!post.is_repost;
+  return !!nestedPost(post, ["repostedPost", "reposted_post", "repost"]) || !!post.isRepost || !!post.is_repost;
 }
 
 function isQuote(post) {
-  return !!nestedPost(post, ["quotedPost", "quoted_post", "quoted_post_media"] ) || !!post.isQuotePost || !!post.is_quote_post;
+  return !!nestedPost(post, ["quotedPost", "quoted_post", "quoted_post_media"]) || !!post.isQuotePost || !!post.is_quote_post;
 }
 
 function isReply(post) {
@@ -370,6 +414,8 @@ function mediaAttachments(post) {
   }
   const link = makeLinkAttachment(post);
   if (link) attachments.push(link);
+  const poll = makePollAttachment(post);
+  if (poll) attachments.push(poll);
   return attachments;
 }
 
@@ -413,7 +459,9 @@ function postToItem(post, depth) {
     if (annotation) annotations.push(annotation);
   }
   if (annotations.length) item.annotations = annotations;
-  if (post.isSpoilerMedia || post.is_spoiler_media || post.contentWarning || post.content_warning) item.contentWarning = post.contentWarning || post.content_warning || "Spoiler";
+  if (post.isSpoilerMedia || post.is_spoiler_media || post.contentWarning || post.content_warning) {
+    item.contentWarning = post.contentWarning || post.content_warning || "Spoiler";
+  }
   return item;
 }
 
@@ -440,6 +488,18 @@ function flattenPage(page) {
     }
     if (Array.isArray(value)) {
       for (const item of value) visit(item);
+      return;
+    }
+    const children = firstValue(value, ["thread_items", "threadItems", "items", "threads"]);
+    if (Array.isArray(children) && children.length) {
+      for (const child of children) {
+        if (child && child.post && typeof child.post === "object") posts.push(child.post);
+        else visit(child);
+      }
+      return;
+    }
+    if (value.post && typeof value.post === "object" && looksLikePost(value.post)) {
+      posts.push(value.post);
       return;
     }
     for (const key of Object.keys(value)) visit(value[key]);
@@ -469,6 +529,7 @@ function nextCursor(page) {
 
 function signature() {
   return [
+    feedKind(),
     stringValue(typeof query_doc_id === "undefined" ? "" : query_doc_id),
     stringValue(typeof include_reposts === "undefined" ? "on" : include_reposts),
     stringValue(typeof include_quotes === "undefined" ? "on" : include_quotes),
@@ -483,11 +544,67 @@ function shouldInclude(post) {
   return true;
 }
 
-function collectPages(limit) {
+function currentUser(auth) {
+  return restGet(auth, "/api/v1/accounts/current_user/", "edit=true").then(body => {
+    const user = firstValue(body, ["user", "current_user"]) || body.user || body;
+    if (!userId(user) && !usernameForUser(user)) throw new Error("Threads did not return the signed-in account. Refresh the Cookie Header.");
+    return user;
+  });
+}
+
+function followingUsers(auth, selfId) {
+  return restGet(auth, `/api/v1/friendships/${encodeURIComponent(selfId)}/following/`, `count=${MAX_FOLLOWING}`).then(body => {
+    const users = Array.isArray(body.users) ? body.users : [];
+    return users.slice(0, MAX_FOLLOWING);
+  });
+}
+
+function userThreads(auth, id) {
+  return restGet(auth, `/api/v1/text_feed/${encodeURIComponent(id)}/profile/`, `count=${POSTS_PER_FOLLOWING}`);
+}
+
+function mapPool(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  function run() {
+    if (nextIndex >= items.length) return Promise.resolve();
+    const index = nextIndex;
+    nextIndex += 1;
+    return Promise.resolve()
+      .then(() => worker(items[index], index))
+      .then(value => { results[index] = value; })
+      .catch(() => { results[index] = null; })
+      .then(run);
+  }
+  const runners = [];
+  const count = Math.min(concurrency, Math.max(items.length, 1));
+  for (let i = 0; i < count; i += 1) runners.push(run());
+  return Promise.all(runners).then(() => results.filter(Boolean));
+}
+
+function collectFollowingPages(auth) {
+  return currentUser(auth).then(self => {
+    const selfId = userId(self);
+    return followingUsers(auth, selfId).then(users => {
+      const targets = [{ id: selfId }].concat(users.map(user => ({ id: userId(user) })));
+      const unique = [];
+      const seen = {};
+      for (const target of targets) {
+        if (!target.id || seen[target.id]) continue;
+        seen[target.id] = true;
+        unique.push(target);
+      }
+      // ponytail: capped parallel Following merge; raise MAX_FOLLOWING if Loom timeout budget grows
+      return mapPool(unique, FOLLOWING_CONCURRENCY, target => userThreads(auth, target.id));
+    });
+  });
+}
+
+function collectGraphqlPages(auth, limit) {
   const pages = [];
   function next(cursor, remaining) {
     if (remaining <= 0) return Promise.resolve(pages);
-    return requestPage(cursor).then(page => {
+    return requestGraphqlPage(auth, cursor).then(page => {
       pages.push(page);
       const cursorValue = nextCursor(page);
       return !cursorValue || cursorValue === cursor ? pages : next(cursorValue, remaining - 1);
@@ -496,45 +613,42 @@ function collectPages(limit) {
   return next(null, limit);
 }
 
-function identityFromPage(page) {
-  const first = flattenPage(page)[0];
-  return first ? userForPost(first) : null;
+function collectPages(auth, limit) {
+  return feedKind() === "for_you" ? collectGraphqlPages(auth, limit) : collectFollowingPages(auth);
 }
 
 function handleError(error) {
   if (error.authorization && typeof raiseCondition === "function") {
-    raiseCondition("authorize", "Threads web session expired", "Sign in again, copy fresh Threads cookies, and update the connector.");
+    raiseCondition("authorize", "Threads web session expired", "Sign in again, paste fresh sessionid and csrftoken, and update the connector.");
   } else {
     processError(error);
   }
 }
 
 function verify() {
-  try { credentials(); variablesFor(null); } catch (error) { processError(error); return; }
-  requestPage(null).then(page => {
-    const user = identityFromPage(page);
-    if (!user) {
-      throw new Error("The selected GraphQL query returned no feed posts. Capture the /api/graphql pagination request created when scrolling the home feed, then paste its matching doc_id and complete variables JSON.");
-    }
-    const handle = user ? usernameForUser(user) : "";
-    const verification = { displayName: handle ? `Threads Web · @${handle}` : "Threads Web" };
-    if (user) {
-      verification.accountIdentity = identityForUser(user);
-      if (avatarForUser(user)) verification.icon = avatarForUser(user);
-    }
+  let auth;
+  try { auth = credentials(); } catch (error) { processError(error); return; }
+  currentUser(auth).then(user => {
+    const handle = usernameForUser(user);
+    const verification = {
+      displayName: handle ? `Threads · @${handle}` : "Threads",
+      accountIdentity: identityForUser(user)
+    };
     processVerification(verification);
   }).catch(handleError);
 }
 
 function load() {
-  try { credentials(); variablesFor(null); } catch (error) { processError(error); return; }
+  let auth;
+  try { auth = credentials(); } catch (error) { processError(error); return; }
   const state = readState();
   const feedSignature = signature();
   if (state.signature === feedSignature && state.loadedAt && Date.now() - state.loadedAt < refreshMinutes() * 60000) {
     processResults([], true);
     return;
   }
-  collectPages(state.lastSeenAt ? 1 : MAX_BACKFILL_PAGES).then(pages => {
+  const pageLimit = feedKind() === "for_you" ? (state.lastSeenAt ? 1 : MAX_BACKFILL_PAGES) : 1;
+  collectPages(auth, pageLimit).then(pages => {
     const items = [];
     const seen = {};
     const ids = [];

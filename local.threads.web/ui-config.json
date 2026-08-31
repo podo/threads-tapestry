@@ -3,48 +3,45 @@
     {
       "name": "sessionid",
       "type": "text",
-      "prompt": "sessionid cookie"
+      "prompt": "sessionid",
+      "placeholder": "From Application → Cookies → sessionid"
     },
     {
       "name": "csrftoken",
       "type": "text",
-      "prompt": "csrftoken cookie"
+      "prompt": "csrftoken",
+      "placeholder": "From Application → Cookies → csrftoken"
     },
     {
       "name": "ds_user_id",
       "type": "text",
-      "prompt": "ds_user_id cookie"
+      "prompt": "ds_user_id (optional)",
+      "placeholder": "Leave blank to derive from sessionid"
     },
     {
       "name": "mid",
       "type": "text",
-      "prompt": "mid cookie"
+      "prompt": "mid (optional)",
+      "placeholder": "Optional"
     },
     {
       "name": "ig_did",
       "type": "text",
-      "prompt": "ig_did cookie"
+      "prompt": "ig_did (optional)",
+      "placeholder": "Optional"
     },
     {
-      "name": "rur",
-      "type": "text",
-      "prompt": "rur cookie (optional)"
+      "name": "feed_kind",
+      "type": "choices",
+      "prompt": "Feed",
+      "choices": "following,for_you",
+      "value": "following"
     },
     {
       "name": "query_doc_id",
       "type": "text",
-      "prompt": "Home-feed GraphQL doc_id"
-    },
-    {
-      "name": "query_name",
-      "type": "text",
-      "prompt": "GraphQL friendly name (optional)"
-    },
-    {
-      "name": "query_variables",
-      "type": "text",
-      "prompt": "Captured variables JSON",
-      "placeholder": "Paste the complete variables object; replace its cursor with __CURSOR__"
+      "prompt": "Home-feed doc_id (For You only)",
+      "placeholder": "Leave blank for Following; required only for For You"
     },
     {
       "name": "include_reposts",
