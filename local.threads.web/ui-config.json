@@ -77,8 +77,8 @@
     {
       "name": "authorization_bearer",
       "type": "text",
-      "prompt": "Authorization Bearer (optional writes)",
-      "placeholder": "Leave blank; only if cookie like/save/repost fails"
+      "prompt": "Authorization Bearer (optional)",
+      "placeholder": "Can be left blank"
     },
     {
       "name": "refresh_interval",

@@ -17,7 +17,7 @@ Single cookie-authenticated Threads connector for Tapestry. Default feed is
 | Include reposts / quotes / replies | switches | Defaults: on / on / off |
 | Show Metrics | switch | Default on |
 | Following Account Cap | choices | 8 / 12 / 20 / 40 (default 12) |
-| Authorization Bearer | optional | Writes only; leave blank unless cookie likes fail |
+| Authorization Bearer | optional | Can be left blank; only for writes if cookie likes fail |
 | Refresh interval | choices | 30 / 60 / 120 |
 
 Tapestry has no `optional` flag on inputs. Optional means: not present in UI, or
