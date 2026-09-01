@@ -37,6 +37,10 @@ function postsFixture() {
       caption: { text: "Hello @bob and #threads see https://example.com/read." }
     },
     {
+      pk: "text-bob-1", code: "text-bob-1", taken_at: 1788087610, user: user("bob", "Bob Example", "2"),
+      caption: { text: "Hello @carol and #threads see https://example.com/read." }
+    },
+    {
       pk: "image-1", code: "image-1", taken_at: 1788087540, user: user("bob", "Bob Example", "2"),
       caption: { text: "An image" }, accessibility_caption: "A misty mountain",
       image_versions2: { candidates: [
@@ -98,7 +102,7 @@ function postsFixture() {
       }
     },
     {
-      pk: "spoiler-1", code: "spoiler-1", taken_at: 1788087100, user: alice,
+      pk: "spoiler-1", code: "spoiler-1", taken_at: 1788087100, user: user("carol", "Carol Example", "3"),
       caption: { text: "Secret" }, is_spoiler_media: true
     }
   ];
@@ -123,7 +127,21 @@ function restRouter(url, method = "GET") {
     return fullResponse({ user: user("alice", "Alice Example", "1") });
   }
   if (url.indexOf("/friendships/1/following/") >= 0) {
-    return fullResponse({ users: [user("bob", "Bob Example", "2"), user("carol", "Carol Example", "3")] });
+    return fullResponse({
+      users: [
+        user("bob", "Bob Example", "2"),
+        user("carol", "Carol Example", "3"),
+        user("dana", "Dana Example", "4"),
+        user("erin", "Erin Example", "5"),
+        user("frank", "Frank Example", "6"),
+        user("grace", "Grace Example", "7"),
+        user("henry", "Henry Reposter", "8"),
+        user("jules", "Jules Example", "10")
+      ]
+    });
+  }
+  if (url.indexOf("/feed/text_post_app_timeline/") >= 0) {
+    return fullResponse({ status: "fail", message: "login_required" }, 403);
   }
   if (url.indexOf("/text_feed/") >= 0 && url.indexOf("/replies/") >= 0) {
     return fullResponse({
@@ -148,7 +166,7 @@ function restRouter(url, method = "GET") {
 function makeContext(overrides = {}) {
   const state = new Map();
   const context = {
-    console, Date, Promise,
+    console, Date, Promise, setTimeout, clearTimeout,
     site: "https://www.threads.com",
     cookie_header: undefined,
     sessionid: "1%3Aabc",
@@ -157,12 +175,16 @@ function makeContext(overrides = {}) {
     mid: "fixture-mid",
     ig_did: "fixture-device",
     feed_kind: "following",
+    following_doc_id: "",
+    for_you_doc_id: "",
     query_doc_id: "",
     include_reposts: "on",
+    reposts_followed_only: "off",
     include_quotes: "on",
     include_replies: "off",
     show_metrics: "on",
     following_account_cap: "12",
+    posts_per_account: "8",
     authorization_bearer: "",
     refresh_interval: "30",
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
@@ -198,6 +220,7 @@ function makeContext(overrides = {}) {
 
 async function settle(rounds = 40) {
   for (let i = 0; i < rounds; i += 1) await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setTimeout(resolve, 1600));
 }
 
 async function run() {
@@ -207,7 +230,11 @@ async function run() {
   assert.ok(uiConfig.inputs.some(input => input.name === "csrftoken"));
   assert.ok(uiConfig.inputs.some(input => input.name === "ds_user_id"));
   assert.ok(!uiConfig.inputs.some(input => input.name === "cookie_header"));
+  assert.ok(uiConfig.inputs.some(input => input.name === "following_doc_id" && !input.value));
+  assert.ok(uiConfig.inputs.some(input => input.name === "for_you_doc_id" && !input.value));
   assert.ok(uiConfig.inputs.some(input => input.name === "query_doc_id" && !input.value));
+  assert.ok(uiConfig.inputs.some(input => input.name === "reposts_followed_only"));
+  assert.ok(uiConfig.inputs.some(input => input.name === "posts_per_account"));
   assert.ok(uiConfig.inputs.some(input => input.name === "show_metrics"));
   assert.ok(uiConfig.inputs.some(input => input.name === "following_account_cap"));
   assert.ok(uiConfig.inputs.some(input => input.name === "authorization_bearer" && !input.value));
@@ -230,7 +257,7 @@ async function run() {
   await settle();
   assert.ifError(context.error);
   assert.strictEqual(context.complete, true);
-  assert.ok(context.results.length >= 8, "following merge returns media variants");
+  assert.ok(context.results.length >= 7, "following merge returns media variants");
   assert.ok(context.requests.every(request => request.url.indexOf("/api/graphql") < 0), "Following must not require GraphQL");
   assert.match(context.requests[0].headers.Cookie, /sessionid=1%3Aabc/);
   assert.match(context.requests[0].headers.Cookie, /csrftoken=fixture-csrf/);
@@ -238,20 +265,20 @@ async function run() {
   assert.strictEqual(context.requests[0].headers["User-Agent"], "Barcelona 289.0.0.14.109 Android");
 
   const byUri = suffix => context.results.find(item => item.uri && item.uri.endsWith(`/post/${suffix}`));
-  const text = byUri("text-1");
-  assert.strictEqual(text.author.name, "Alice Example");
-  assert.strictEqual(text.author.username, "@alice");
-  assert.match(text.body, /<a href="https:\/\/www\.threads\.com\/@bob">@bob<\/a>/);
+  const text = byUri("text-bob-1");
+  assert.strictEqual(text.author.name, "Bob Example");
+  assert.strictEqual(text.author.username, "@bob");
+  assert.match(text.body, /<a href="https:\/\/www\.threads\.com\/@carol">@carol<\/a>/);
   assert.match(text.body, /<a href="[^"]*threads[^"]*">#threads<\/a>/);
   assert.match(text.body, /<a href="https:\/\/example\.com\/read">/);
   assert.match(text.body, /threads-meta-host/);
-  assert.match(text.body, /<!-- .*@plugin12@0\.7\.3 -->/);
+  assert.match(text.body, /<!-- .*@plugin14@0\.7\.5 -->/);
   assert.ok(text.actions.like);
   assert.ok(text.actions.save);
   assert.ok(text.actions.repost);
   assert.ok(text.actions.thread);
   assert.ok(text.actions.openLink);
-  assert.match(text.actions._connectorBuild, /@plugin12@0\.7\.3/);
+  assert.match(text.actions._connectorBuild, /@plugin14@0\.7\.5/);
   assert.ok(text.actions._bodyAnchorCount >= 3);
   assert.match(text.author.avatar, /^data:image\/jpeg;base64,/);
   assert.match(text.actions._authorAvatarAssigned, /^data:/);
@@ -283,8 +310,15 @@ async function run() {
   assert.ok(quote.attachments.some(item => item.author && item.author.name === "Grace Example"));
 
   const repost = byUri("repost-1");
-  assert.strictEqual(repost.author.name, "Ivy Original");
-  assert.strictEqual(repost.annotations[0].text, "Reposted by @henry");
+  assert.strictEqual(repost.author.name, "Henry Reposter");
+  assert.strictEqual(repost.annotations[0].text, "Originally by @ivy");
+  assert.match(repost.annotations[0].icon, /^data:image\/jpeg;base64,/);
+
+  const followedOnly = makeContext({ reposts_followed_only: "on" });
+  vm.runInContext("load()", followedOnly);
+  await settle();
+  assert.ifError(followedOnly.error);
+  assert.ok(!followedOnly.results.some(item => item.uri && item.uri.endsWith("/post/repost-1")), "ivy repost filtered when original not followed");
 
   const spoiler = byUri("spoiler-1");
   assert.strictEqual(spoiler.contentWarning, "Spoiler");
@@ -312,12 +346,16 @@ async function run() {
   assert.ok(Array.isArray(context.actionResult));
   assert.ok(context.actionResult.length >= 2);
 
-  const metricPost = Object.assign({}, postsFixture()[0], { like_count: 5, reply_count: 2 });
+  const metricPost = Object.assign({}, postsFixture().find(post => post.code === "text-bob-1"), {
+    like_count: 5,
+    reply_count: 2,
+    taken_at: 1999999999
+  });
   const withMetrics = makeContext({
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
       withMetrics.requests.push({ url, method, params, headers, fullResponseRequested });
       if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
-      if (url.indexOf("/text_feed/1/profile/") >= 0) {
+      if (url.indexOf("/text_feed/2/profile/") >= 0) {
         return fullResponse({ threads: [{ thread_items: [{ post: metricPost }] }], next_max_id: null });
       }
       return restRouter(url, method);
@@ -327,16 +365,17 @@ async function run() {
   vm.runInContext("load()", withMetrics);
   await settle();
   assert.ifError(withMetrics.error);
-  assert.match(withMetrics.results[0].body, /threads-meta-metrics/);
-  assert.match(withMetrics.results[0].body, /5 likes/);
-  assert.ok(!(withMetrics.results[0].annotations || []).some(item => /likes/.test(item.text)));
+  const metricItem = withMetrics.results.find(item => item.uri && item.uri.endsWith("/post/text-bob-1"));
+  assert.match(metricItem.body, /threads-meta-metrics/);
+  assert.match(metricItem.body, /5 likes/);
+  assert.ok(!(metricItem.annotations || []).some(item => /likes/.test(item.text)));
 
   const noMetrics = makeContext({
     show_metrics: "off",
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
       noMetrics.requests.push({ url, method, params, headers, fullResponseRequested });
       if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
-      if (url.indexOf("/text_feed/1/profile/") >= 0) {
+      if (url.indexOf("/text_feed/2/profile/") >= 0) {
         return fullResponse({ threads: [{ thread_items: [{ post: metricPost }] }], next_max_id: null });
       }
       return restRouter(url, method);
@@ -346,14 +385,15 @@ async function run() {
   vm.runInContext("load()", noMetrics);
   await settle();
   assert.ifError(noMetrics.error);
-  assert.ok(!/threads-meta-metrics/.test(noMetrics.results[0].body || ""));
-  assert.ok(!(noMetrics.results[0].annotations || []).some(item => /likes/.test(item.text)));
+  const plainItem = noMetrics.results.find(item => item.uri && item.uri.endsWith("/post/text-bob-1"));
+  assert.ok(!/threads-meta-metrics/.test(plainItem.body || ""));
+  assert.ok(!(plainItem.annotations || []).some(item => /likes/.test(item.text)));
 
   const capped = makeContext({ following_account_cap: "8" });
   vm.runInContext("load()", capped);
   await settle();
   assert.ifError(capped.error);
-  assert.ok(capped.requests.some(request => /\/friendships\/1\/following\/\?count=8/.test(request.url)));
+  assert.ok(capped.requests.some(request => /\/friendships\/1\/following\/\?count=24/.test(request.url)));
 
   const bearerLike = makeContext({ authorization_bearer: "IGT:2:fixture" });
   vm.runInContext("load()", bearerLike);
@@ -388,14 +428,14 @@ async function run() {
   await settle();
   assert.ifError(emptyDoc.error);
 
-  const forYouMissing = makeContext({ feed_kind: "for_you", query_doc_id: "" });
+  const forYouMissing = makeContext({ feed_kind: "for_you", for_you_doc_id: "", query_doc_id: "" });
   vm.runInContext("load()", forYouMissing);
   await settle();
   assert.match(forYouMissing.error.message, /doc_id/i);
 
   const forYou = makeContext({
     feed_kind: "for_you",
-    query_doc_id: "99999999999999999",
+    for_you_doc_id: "99999999999999999",
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
       forYou.requests.push({ url, method, params, headers, fullResponseRequested });
       if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
@@ -415,11 +455,50 @@ async function run() {
   assert.match(forYou.requests.find(request => request.url.indexOf("/api/graphql") >= 0).params, /doc_id=99999999999999999/);
   assert.match(decodeURIComponent(forYou.requests.find(request => request.url.indexOf("/api/graphql") >= 0).params), /"after":null/);
 
+  const followingGraphql = makeContext({
+    feed_kind: "following",
+    following_doc_id: "88888888888888888",
+    sendRequest: async (url, method, params, headers, fullResponseRequested) => {
+      followingGraphql.requests.push({ url, method, params, headers, fullResponseRequested });
+      if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
+      if (url.indexOf("/api/graphql") >= 0) return fullResponse(graphqlFixture());
+      return restRouter(url, method);
+    },
+    requests: []
+  });
+  vm.runInContext("load()", followingGraphql);
+  await settle();
+  assert.ifError(followingGraphql.error);
+  assert.ok(followingGraphql.requests.some(request => request.url.indexOf("/api/graphql") >= 0));
+  assert.ok(!followingGraphql.requests.some(request => /\/friendships\/1\/following\//.test(request.url)));
+
   const replies = makeContext({ include_replies: "on" });
   vm.runInContext("load()", replies);
   await settle();
   assert.ifError(replies.error);
   assert.ok(replies.results.some(item => item.uri && item.uri.endsWith("/post/reply-1")));
+
+  const postsCap = makeContext({ posts_per_account: "4" });
+  vm.runInContext("load()", postsCap);
+  await settle();
+  assert.ifError(postsCap.error);
+  assert.ok(postsCap.requests.some(request => /text_feed\/2\/profile\/\?count=4/.test(request.url)));
+
+  const thin = makeContext({
+    sendRequest: async (url, method, params, headers, fullResponseRequested) => {
+      thin.requests.push({ url, method, params, headers, fullResponseRequested });
+      if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
+      if (url.indexOf("/text_feed/") >= 0 && url.indexOf("/profile/") >= 0) {
+        return fullResponse({ message: "rate limited" }, 429);
+      }
+      return restRouter(url, method);
+    },
+    requests: []
+  });
+  vm.runInContext("load()", thin);
+  await settle();
+  assert.ifError(thin.error);
+  assert.strictEqual(thin.condition && thin.condition.kind, "warning");
 
   const unauthorized = makeContext({
     sendRequest: async () => fullResponse({ message: "login required" }, 401)

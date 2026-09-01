@@ -16,8 +16,8 @@ async function run() {
   const actions = JSON.parse(execFileSync("unzip", ["-p", archive, "actions.json"], { encoding: "utf8" }));
   assert.strictEqual(config.id, "local.threads.web");
   assert.strictEqual(config.display_name, "Threads");
-  assert.strictEqual(config.version, 12);
-  for (const name of ["ds_user_id", "mid", "ig_did", "query_doc_id", "authorization_bearer"]) {
+  assert.strictEqual(config.version, 14);
+  for (const name of ["ds_user_id", "mid", "ig_did", "query_doc_id", "following_doc_id", "for_you_doc_id", "authorization_bearer"]) {
     const input = ui.inputs.find(item => item.name === name);
     assert.ok(input, name);
     assert.match(input.placeholder || "", /can be left blank/i);
@@ -30,7 +30,11 @@ async function run() {
   assert.ok(actions.items.some(item => item.id === "thread" && item.role === "context"));
   assert.ok(ui.inputs.some(input => input.name === "sessionid"));
   assert.ok(ui.inputs.some(input => input.name === "csrftoken"));
+  assert.ok(ui.inputs.some(input => input.name === "following_doc_id"));
+  assert.ok(ui.inputs.some(input => input.name === "for_you_doc_id"));
   assert.ok(ui.inputs.some(input => input.name === "query_doc_id"));
+  assert.ok(ui.inputs.some(input => input.name === "posts_per_account"));
+  assert.ok(ui.inputs.some(input => input.name === "reposts_followed_only"));
   assert.ok(!ui.inputs.some(input => input.name === "cookie_header"));
   assert.ok(!ui.inputs.some(input => input.name === "query_variables"));
   console.log("Packaged Threads connector archive validated.");

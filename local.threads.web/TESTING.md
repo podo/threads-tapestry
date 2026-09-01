@@ -19,7 +19,7 @@ unzip -t Threads.tapestry
 unzip -l Threads.tapestry
 ```
 
-Expect `plugin-config.json` `version` **10** for this release and
+Expect `plugin-config.json` `version` **14** for this release and
 `actions` / `discovery` / `suggestions` / `apps` / `TESTING.md` in the archive.
 
 ## Loom review checklist
@@ -29,7 +29,7 @@ Install [v0.6.0 `Threads.tapestry`](https://github.com/podo/threads-tapestry/rel
 
 ### Reload proof
 
-1. Console on Verify/Load: `threads-web … @plugin10@0.7.1`
+1. Console on Verify/Load: `threads-web … @plugin14@0.7.5`
 2. Verify display name is `Threads · Following` or `Threads · For You` (not `@handle`)
 3. Any item: `actions._connectorBuild` and body HTML comment match that stamp
 4. Body starts with optional `threads-meta-host` then `threads-meta-metrics` (when metrics on), then caption
@@ -43,25 +43,28 @@ Install [v0.6.0 `Threads.tapestry`](https://github.com/podo/threads-tapestry/rel
 4. Like / save / repost toggle filled icons; like/repost also bump body metrics
 5. Thread context returns parent + replies when the replies endpoint works
 6. Open in Threads opens the post URI
-7. Annotations only `Reposted by @…` / `Reply to @…`
+7. Annotations only `Originally by @…` / `Reply to @…` (reposts show the reposter as author)
 
 ### Feeds
 
 1. Following loads under ~60s at default cap 12 (try 8 if timeouts)
-2. For You needs `doc_id`; empty doc_id must not break Following
+2. For You needs **For You doc_id**; Following GraphQL needs **Following doc_id**; legacy fallback still works
 3. Switching Following ↔ For You must not share high-water (no cross-mode skip)
+4. Thin or partial loads show a Loom warning when many profile fetches fail
+5. **Reposts From Followed Only** hides reposts whose original author is not in your following list
 
 ### Cookie write spike (Phase 4)
 
 1. Like a post with cookies only (no Bearer)
-2. If success: leave Bearer blank
+2. If success: leave Bearer blank and document cookie writes as supported
 3. If clear “read-only for writes” / 404 ladder: paste optional `Authorization Bearer`
    (`IGT:2…` from a trusted capture) and retry like once
 4. If still failing: treat actions as best-effort; use Open in Threads
+5. Record outcome in this checklist when testing a live account (cookies redacted)
 
 Do not commit Bearer or cookies. Redact Network logs.
 
 ## Deferred
 
-- True Following timeline endpoint (keep profile-merge until Meta exposes a stable cookie path)
-- Avatar embed for annotation icons (author only today)
+- Bearer-based home timeline on `i.instagram.com` (optional advanced path)
+- Reply compose action (requires Bearer + Bloks login)
