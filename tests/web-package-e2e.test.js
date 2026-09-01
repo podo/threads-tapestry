@@ -16,7 +16,7 @@ async function run() {
   const actions = JSON.parse(execFileSync("unzip", ["-p", archive, "actions.json"], { encoding: "utf8" }));
   assert.strictEqual(config.id, "local.threads.web");
   assert.strictEqual(config.display_name, "Threads");
-  assert.strictEqual(config.version, 12);
+  assert.strictEqual(config.version, 13);
   for (const name of ["ds_user_id", "mid", "ig_did", "query_doc_id", "authorization_bearer"]) {
     const input = ui.inputs.find(item => item.name === name);
     assert.ok(input, name);

@@ -13,7 +13,7 @@ const THREADS_APP_ID = "238260118697367";
 const DEFAULT_GRAPHQL_VARIABLES = { first: 25, after: "__CURSOR__", scale: 2 };
 const connectorBuildId = "2026-09-01T05:40Z-following-feed";
 const connectorPluginVersion = 13;
-const connectorRelease = "0.7.3";
+const connectorRelease = "0.7.4";
 
 let avatarDataUrlCache = null;
 
