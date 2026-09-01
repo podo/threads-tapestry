@@ -43,7 +43,7 @@ Install [v0.6.0 `Threads.tapestry`](https://github.com/podo/threads-tapestry/rel
 4. Like / save / repost toggle filled icons; like/repost also bump body metrics
 5. Thread context returns parent + replies when the replies endpoint works
 6. Open in Threads opens the post URI
-7. Annotations only `Reposted by @…` / `Reply to @…`
+7. Annotations only `Originally by @…` / `Reply to @…` (reposts show the reposter as author)
 
 ### Feeds
 

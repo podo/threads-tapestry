@@ -27,7 +27,7 @@ empty text accepted by `verify()` / `load()` without throwing.
 
 Card chrome order (Loom `post` style):
 
-1. Native annotations: `Reposted by @handle` / `Reply to @handle` only (above Service).
+1. Native annotations: `Originally by @handle` / `Reply to @handle` only (above Service). Reposts use the reposter as `item.author`.
 2. Service · Feed Type via verify `displayName` (`Threads · Following` / `Threads · For You`).
 3. Author: display name + `@handle` on `item.author` (assigned last).
 4. Body meta (host + metrics) → caption → URL paragraphs → attachments
@@ -37,8 +37,9 @@ Native Tapestry attachments may render under the HTML body; that is an API limit
 
 ## Feed modes
 
-- **Following:** `current_user` → following list (configurable cap, 4-way parallel,
-  8 posts each) → merge by time. Works with session cookies alone.
+- **Following:** Prefer native timeline (`/api/v1/feed/text_post_app_timeline/`) when
+  cookies allow; optional GraphQL `doc_id` from the **Following** tab Network tab;
+  otherwise profile-merge (configurable cap, rotated across refreshes, 8 posts each).
 - **For You:** GraphQL home feed with built-in variables; requires optional
   `doc_id` when Meta's persisted query ID is needed.
 - High-water sync is **per mode** (`modes.following` / `modes.for_you`: URI ids +

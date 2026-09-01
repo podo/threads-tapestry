@@ -41,7 +41,7 @@
       "name": "query_doc_id",
       "type": "text",
       "prompt": "Home-feed doc_id (optional)",
-      "placeholder": "Can be left blank"
+      "placeholder": "Can be left blank; For You or Following tab doc_id"
     },
     {
       "name": "include_reposts",

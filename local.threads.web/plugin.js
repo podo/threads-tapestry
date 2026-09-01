@@ -11,8 +11,8 @@ const GRAPHQL_PATH = "/api/graphql/";
 const READ_USER_AGENT = "Barcelona 289.0.0.14.109 Android";
 const THREADS_APP_ID = "238260118697367";
 const DEFAULT_GRAPHQL_VARIABLES = { first: 25, after: "__CURSOR__", scale: 2 };
-const connectorBuildId = "2026-08-31T21:50Z-optional-blank";
-const connectorPluginVersion = 12;
+const connectorBuildId = "2026-09-01T05:40Z-following-feed";
+const connectorPluginVersion = 13;
 const connectorRelease = "0.7.3";
 
 let avatarDataUrlCache = null;
@@ -810,6 +810,7 @@ function postToItem(post, depth) {
   const originalRepost = nestedPost(post, ["repostedPost", "reposted_post", "repost"]);
   const sourcePost = originalRepost || post;
   const sourceUser = userForPost(sourcePost);
+  const displayUser = originalRepost ? userForPost(post) : sourceUser;
   const date = normalizeDate(post) || normalizeDate(sourcePost);
   const uri = postPermalink(post, userForPost(post)) || postPermalink(sourcePost, sourceUser);
   if (!date || !uri || typeof Item === "undefined" || typeof Item.createWithUriDate !== "function") return null;
@@ -825,10 +826,9 @@ function postToItem(post, depth) {
   // Loom renders native annotations above Service/Author — only arrival context.
   const annotations = [];
   if (originalRepost) {
-    const reposter = userForPost(post);
-    const handle = usernameForUser(reposter);
-    const text = handle ? `Reposted by @${handle}` : `Reposted by ${nameForUser(reposter)}`;
-    const annotation = createAnnotation(text, uriForUser(reposter), avatarForUser(reposter));
+    const originalHandle = usernameForUser(sourceUser);
+    const text = originalHandle ? `Originally by @${originalHandle}` : `Originally by ${nameForUser(sourceUser)}`;
+    const annotation = createAnnotation(text, uriForUser(sourceUser), avatarForUser(sourceUser));
     if (annotation) annotations.push(annotation);
   }
   if (isReply(post)) {
@@ -850,7 +850,7 @@ function postToItem(post, depth) {
   if (attachments.length) item.attachments = attachments;
 
   // Assign author last — matches X / Bluesky and Loom identity quirks.
-  item.author = identityForUser(sourceUser);
+  item.author = identityForUser(displayUser);
   if (depth === 0) item.actions = actionsForPost(sourcePost, uri, body);
   return item;
 }
@@ -1061,12 +1061,22 @@ function currentUser(auth) {
   });
 }
 
-function followingUsers(auth, selfId) {
-  const cap = followingAccountCap();
-  return restGet(auth, `/api/v1/friendships/${encodeURIComponent(selfId)}/following/`, `count=${cap}`).then(body => {
-    const users = Array.isArray(body.users) ? body.users : [];
-    return users.slice(0, cap);
-  });
+function followingUsers(auth, selfId, maxCount) {
+  const cap = Math.max(1, Number(maxCount) || followingAccountCap());
+  const users = [];
+  function nextPage(maxId) {
+    if (users.length >= cap) return Promise.resolve(users.slice(0, cap));
+    const batchSize = Math.min(50, cap - users.length);
+    const query = `count=${batchSize}${maxId ? `&max_id=${encodeURIComponent(maxId)}` : ""}`;
+    return restGet(auth, `/api/v1/friendships/${encodeURIComponent(selfId)}/following/`, query).then(body => {
+      const batch = Array.isArray(body.users) ? body.users : [];
+      for (const user of batch) users.push(user);
+      const nextId = stringValue(firstValue(body, ["next_max_id", "nextMaxId"]));
+      if (nextId && batch.length > 0 && users.length < cap) return nextPage(nextId);
+      return users.slice(0, cap);
+    });
+  }
+  return nextPage("");
 }
 
 function userThreads(auth, id) {
@@ -1076,6 +1086,7 @@ function userThreads(auth, id) {
 function mapPool(items, concurrency, worker) {
   const results = new Array(items.length);
   let nextIndex = 0;
+  let failures = 0;
   function run() {
     if (nextIndex >= items.length) return Promise.resolve();
     const index = nextIndex;
@@ -1083,29 +1094,67 @@ function mapPool(items, concurrency, worker) {
     return Promise.resolve()
       .then(() => worker(items[index], index))
       .then(value => { results[index] = value; })
-      .catch(() => { results[index] = null; })
+      .catch(error => {
+        failures += 1;
+        results[index] = null;
+        try { console.log(`threads-web profile-fetch-failed index=${index} ${stringValue(error && error.message)}`); } catch (_) { /* Loom console optional */ }
+      })
       .then(run);
   }
   const runners = [];
   const count = Math.min(concurrency, Math.max(items.length, 1));
   for (let i = 0; i < count; i += 1) runners.push(run());
-  return Promise.all(runners).then(() => results.filter(Boolean));
+  return Promise.all(runners).then(() => ({ results: results.filter(Boolean), failures }));
 }
 
-function collectFollowingPages(auth) {
+function userThreadsWithRetry(auth, id) {
+  return userThreads(auth, id).catch(error => userThreads(auth, id).catch(() => Promise.reject(error)));
+}
+
+function requestTimelinePage(auth, cursor) {
+  const params = ["pagination_source=text_post_feed_threads", "count=25"];
+  if (cursor) params.push(`max_id=${encodeURIComponent(cursor)}`);
+  return restGet(auth, "/api/v1/feed/text_post_app_timeline/", params.join("&"));
+}
+
+function collectCookieTimelinePages(auth, limit) {
+  const pages = [];
+  function next(cursor, remaining) {
+    if (remaining <= 0) return Promise.resolve(pages);
+    return requestTimelinePage(auth, cursor).then(page => {
+      pages.push(page);
+      const cursorValue = nextCursor(page);
+      return !cursorValue || cursorValue === cursor ? pages : next(cursorValue, remaining - 1);
+    });
+  }
+  return next(null, limit);
+}
+
+function collectFollowingPages(auth, modeState) {
   return currentUser(auth).then(self => {
     const selfId = userId(self);
-    return followingUsers(auth, selfId).then(users => {
-      const targets = [{ id: selfId }].concat(users.map(user => ({ id: userId(user) })));
+    const cap = followingAccountCap();
+    const poolSize = Math.max(cap * 3, cap);
+    return followingUsers(auth, selfId, poolSize).then(users => {
+      const pool = users.map(user => ({ id: userId(user) })).filter(target => target.id);
+      const offset = pool.length ? Number(modeState.followingOffset || 0) % pool.length : 0;
+      const selected = [];
+      for (let i = 0; i < cap && pool.length; i += 1) {
+        selected.push(pool[(offset + i) % pool.length]);
+      }
       const unique = [];
       const seen = {};
-      for (const target of targets) {
+      for (const target of selected) {
         if (!target.id || seen[target.id]) continue;
         seen[target.id] = true;
         unique.push(target);
       }
       // ponytail: capped parallel Following merge; raise following_account_cap if Loom timeout budget grows
-      return mapPool(unique, FOLLOWING_CONCURRENCY, target => userThreads(auth, target.id));
+      return mapPool(unique, FOLLOWING_CONCURRENCY, target => userThreadsWithRetry(auth, target.id)).then(({ results, failures }) => ({
+        pages: results,
+        followingOffset: pool.length ? (offset + cap) % pool.length : 0,
+        failures
+      }));
     });
   });
 }
@@ -1123,8 +1172,16 @@ function collectGraphqlPages(auth, limit) {
   return next(null, limit);
 }
 
-function collectPages(auth, limit) {
-  return feedKind() === "for_you" ? collectGraphqlPages(auth, limit) : collectFollowingPages(auth);
+function collectPages(auth, limit, modeState) {
+  if (feedKind() === "for_you" || (feedKind() === "following" && auth.docId)) {
+    return collectGraphqlPages(auth, limit).then(pages => ({ pages, followingOffset: modeState.followingOffset || 0 }));
+  }
+  return collectCookieTimelinePages(auth, limit).then(pages => {
+    if (flattenPage(pages).length) {
+      return { pages, followingOffset: modeState.followingOffset || 0 };
+    }
+    return collectFollowingPages(auth, modeState);
+  }).catch(() => collectFollowingPages(auth, modeState));
 }
 
 function handleError(error) {
@@ -1164,7 +1221,8 @@ function load() {
   const knownIds = {};
   for (const id of modeState.ids || []) knownIds[id] = true;
   const pageLimit = feedKind() === "for_you" ? (modeState.lastSeenAt ? 1 : MAX_BACKFILL_PAGES) : 1;
-  collectPages(auth, pageLimit).then(pages => {
+  collectPages(auth, pageLimit, modeState).then(result => {
+    const pages = result.pages || [];
     const items = [];
     const seen = {};
     const ids = [];
@@ -1185,8 +1243,10 @@ function load() {
     }
     items.sort((left, right) => right.date.getTime() - left.date.getTime());
     const retained = ids.concat((modeState.ids || []).filter(id => !seen[id])).slice(0, MAX_STORED_IDS);
+    const modePartial = { lastSeenAt: newest, ids: retained };
+    if (typeof result.followingOffset === "number") modePartial.followingOffset = result.followingOffset;
     return embedItemAvatars(items).then(() => {
-      writeModeState(feedSignature, { lastSeenAt: newest, ids: retained });
+      writeModeState(feedSignature, modePartial);
       processResults(items, true);
     });
   }).catch(handleError);
