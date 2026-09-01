@@ -166,7 +166,7 @@ function restRouter(url, method = "GET") {
 function makeContext(overrides = {}) {
   const state = new Map();
   const context = {
-    console, Date, Promise,
+    console, Date, Promise, setTimeout, clearTimeout,
     site: "https://www.threads.com",
     cookie_header: undefined,
     sessionid: "1%3Aabc",
@@ -175,12 +175,16 @@ function makeContext(overrides = {}) {
     mid: "fixture-mid",
     ig_did: "fixture-device",
     feed_kind: "following",
+    following_doc_id: "",
+    for_you_doc_id: "",
     query_doc_id: "",
     include_reposts: "on",
+    reposts_followed_only: "off",
     include_quotes: "on",
     include_replies: "off",
     show_metrics: "on",
     following_account_cap: "12",
+    posts_per_account: "8",
     authorization_bearer: "",
     refresh_interval: "30",
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
@@ -216,6 +220,7 @@ function makeContext(overrides = {}) {
 
 async function settle(rounds = 40) {
   for (let i = 0; i < rounds; i += 1) await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setTimeout(resolve, 1600));
 }
 
 async function run() {
@@ -225,7 +230,11 @@ async function run() {
   assert.ok(uiConfig.inputs.some(input => input.name === "csrftoken"));
   assert.ok(uiConfig.inputs.some(input => input.name === "ds_user_id"));
   assert.ok(!uiConfig.inputs.some(input => input.name === "cookie_header"));
+  assert.ok(uiConfig.inputs.some(input => input.name === "following_doc_id" && !input.value));
+  assert.ok(uiConfig.inputs.some(input => input.name === "for_you_doc_id" && !input.value));
   assert.ok(uiConfig.inputs.some(input => input.name === "query_doc_id" && !input.value));
+  assert.ok(uiConfig.inputs.some(input => input.name === "reposts_followed_only"));
+  assert.ok(uiConfig.inputs.some(input => input.name === "posts_per_account"));
   assert.ok(uiConfig.inputs.some(input => input.name === "show_metrics"));
   assert.ok(uiConfig.inputs.some(input => input.name === "following_account_cap"));
   assert.ok(uiConfig.inputs.some(input => input.name === "authorization_bearer" && !input.value));
@@ -263,13 +272,13 @@ async function run() {
   assert.match(text.body, /<a href="[^"]*threads[^"]*">#threads<\/a>/);
   assert.match(text.body, /<a href="https:\/\/example\.com\/read">/);
   assert.match(text.body, /threads-meta-host/);
-  assert.match(text.body, /<!-- .*@plugin13@0\.7\.4 -->/);
+  assert.match(text.body, /<!-- .*@plugin14@0\.7\.5 -->/);
   assert.ok(text.actions.like);
   assert.ok(text.actions.save);
   assert.ok(text.actions.repost);
   assert.ok(text.actions.thread);
   assert.ok(text.actions.openLink);
-  assert.match(text.actions._connectorBuild, /@plugin13@0\.7\.4/);
+  assert.match(text.actions._connectorBuild, /@plugin14@0\.7\.5/);
   assert.ok(text.actions._bodyAnchorCount >= 3);
   assert.match(text.author.avatar, /^data:image\/jpeg;base64,/);
   assert.match(text.actions._authorAvatarAssigned, /^data:/);
@@ -303,6 +312,13 @@ async function run() {
   const repost = byUri("repost-1");
   assert.strictEqual(repost.author.name, "Henry Reposter");
   assert.strictEqual(repost.annotations[0].text, "Originally by @ivy");
+  assert.match(repost.annotations[0].icon, /^data:image\/jpeg;base64,/);
+
+  const followedOnly = makeContext({ reposts_followed_only: "on" });
+  vm.runInContext("load()", followedOnly);
+  await settle();
+  assert.ifError(followedOnly.error);
+  assert.ok(!followedOnly.results.some(item => item.uri && item.uri.endsWith("/post/repost-1")), "ivy repost filtered when original not followed");
 
   const spoiler = byUri("spoiler-1");
   assert.strictEqual(spoiler.contentWarning, "Spoiler");
@@ -412,14 +428,14 @@ async function run() {
   await settle();
   assert.ifError(emptyDoc.error);
 
-  const forYouMissing = makeContext({ feed_kind: "for_you", query_doc_id: "" });
+  const forYouMissing = makeContext({ feed_kind: "for_you", for_you_doc_id: "", query_doc_id: "" });
   vm.runInContext("load()", forYouMissing);
   await settle();
   assert.match(forYouMissing.error.message, /doc_id/i);
 
   const forYou = makeContext({
     feed_kind: "for_you",
-    query_doc_id: "99999999999999999",
+    for_you_doc_id: "99999999999999999",
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
       forYou.requests.push({ url, method, params, headers, fullResponseRequested });
       if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
@@ -441,7 +457,7 @@ async function run() {
 
   const followingGraphql = makeContext({
     feed_kind: "following",
-    query_doc_id: "88888888888888888",
+    following_doc_id: "88888888888888888",
     sendRequest: async (url, method, params, headers, fullResponseRequested) => {
       followingGraphql.requests.push({ url, method, params, headers, fullResponseRequested });
       if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
@@ -461,6 +477,28 @@ async function run() {
   await settle();
   assert.ifError(replies.error);
   assert.ok(replies.results.some(item => item.uri && item.uri.endsWith("/post/reply-1")));
+
+  const postsCap = makeContext({ posts_per_account: "4" });
+  vm.runInContext("load()", postsCap);
+  await settle();
+  assert.ifError(postsCap.error);
+  assert.ok(postsCap.requests.some(request => /text_feed\/2\/profile\/\?count=4/.test(request.url)));
+
+  const thin = makeContext({
+    sendRequest: async (url, method, params, headers, fullResponseRequested) => {
+      thin.requests.push({ url, method, params, headers, fullResponseRequested });
+      if (/cdninstagram|fbcdn|scontent/i.test(url)) return imageFullResponse();
+      if (url.indexOf("/text_feed/") >= 0 && url.indexOf("/profile/") >= 0) {
+        return fullResponse({ message: "rate limited" }, 429);
+      }
+      return restRouter(url, method);
+    },
+    requests: []
+  });
+  vm.runInContext("load()", thin);
+  await settle();
+  assert.ifError(thin.error);
+  assert.strictEqual(thin.condition && thin.condition.kind, "warning");
 
   const unauthorized = makeContext({
     sendRequest: async () => fullResponse({ message: "login required" }, 401)

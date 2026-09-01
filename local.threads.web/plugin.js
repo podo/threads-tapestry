@@ -2,8 +2,9 @@ const STATE_KEY = "threadsWebStateV1";
 const MAX_BACKFILL_PAGES = 3;
 const MAX_STORED_IDS = 100;
 const DEFAULT_FOLLOWING_CAP = 12;
-const POSTS_PER_FOLLOWING = 8;
+const DEFAULT_POSTS_PER_ACCOUNT = 8;
 const FOLLOWING_CONCURRENCY = 4;
+const PROFILE_FETCH_GAP_MS = 400;
 const AVATAR_EMBED_CONCURRENCY = 4;
 const MAX_AVATAR_BYTES = 200000;
 const GRAPHQL_PATH = "/api/graphql/";
@@ -11,11 +12,12 @@ const GRAPHQL_PATH = "/api/graphql/";
 const READ_USER_AGENT = "Barcelona 289.0.0.14.109 Android";
 const THREADS_APP_ID = "238260118697367";
 const DEFAULT_GRAPHQL_VARIABLES = { first: 25, after: "__CURSOR__", scale: 2 };
-const connectorBuildId = "2026-09-01T05:40Z-following-feed";
-const connectorPluginVersion = 13;
-const connectorRelease = "0.7.4";
+const connectorBuildId = "2026-09-01T15:45Z-feed-improvements";
+const connectorPluginVersion = 14;
+const connectorRelease = "0.7.5";
 
 let avatarDataUrlCache = null;
+let followingIdSet = null;
 
 function connectorStamp() {
   return `${connectorBuildId}@plugin${connectorPluginVersion}@${connectorRelease}`;
@@ -276,6 +278,33 @@ function sourceLabel() {
   return feedKind() === "for_you" ? "For You" : "Following";
 }
 
+function delay(ms) {
+  if (!ms || ms <= 0) return Promise.resolve();
+  if (typeof setTimeout === "function") {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+  return Promise.resolve();
+}
+
+function docIdForMode() {
+  const legacy = stringValue(typeof query_doc_id === "undefined" ? "" : query_doc_id).trim();
+  if (feedKind() === "for_you") {
+    const specific = stringValue(typeof for_you_doc_id === "undefined" ? "" : for_you_doc_id).trim();
+    return specific || legacy;
+  }
+  const specific = stringValue(typeof following_doc_id === "undefined" ? "" : following_doc_id).trim();
+  return specific || legacy;
+}
+
+function repostsFollowedOnly() {
+  return stringValue(typeof reposts_followed_only === "undefined" ? "off" : reposts_followed_only) === "on";
+}
+
+function postsPerAccount() {
+  const parsed = parseInt(typeof posts_per_account === "undefined" ? String(DEFAULT_POSTS_PER_ACCOUNT) : posts_per_account, 10);
+  return [4, 8, 12].indexOf(parsed) >= 0 ? parsed : DEFAULT_POSTS_PER_ACCOUNT;
+}
+
 function credentials() {
   const sessionId = stringValue(typeof sessionid === "undefined" ? "" : sessionid).trim();
   const csrfToken = stringValue(typeof csrftoken === "undefined" ? "" : csrftoken).trim();
@@ -295,7 +324,7 @@ function credentials() {
     mid: stringValue(typeof mid === "undefined" ? "" : mid).trim(),
     ig_did: stringValue(typeof ig_did === "undefined" ? "" : ig_did).trim(),
     rur: "",
-    docId: stringValue(typeof query_doc_id === "undefined" ? "" : query_doc_id).trim(),
+    docId: docIdForMode(),
     bearer: stringValue(typeof authorization_bearer === "undefined" ? "" : authorization_bearer).trim()
   };
 }
@@ -352,7 +381,8 @@ function restPost(auth, path, body) {
 
 function requestGraphqlPage(auth, cursor) {
   if (!auth.docId) {
-    return Promise.reject(new Error("For You needs a home-feed GraphQL doc_id. Capture it from the Threads Network tab, or switch Feed to Following."));
+    const label = sourceLabel();
+    return Promise.reject(new Error(`${label} needs a GraphQL doc_id. Capture it from the ${label} tab in DevTools Network, or leave blank to use profile merge.`));
   }
   const params = [
     "fb_api_caller_class=RelayModern",
@@ -591,6 +621,18 @@ function embedItemAvatar(item) {
 
 function embedItemAvatars(items) {
   return mapPool(items, AVATAR_EMBED_CONCURRENCY, embedItemAvatar).then(() => items);
+}
+
+function embedAnnotationAvatars(items) {
+  const jobs = [];
+  for (const item of items) {
+    if (!item || !item.annotations) continue;
+    for (const annotation of item.annotations) {
+      if (!annotation || !annotation.icon || stringValue(annotation.icon).indexOf("data:image/") === 0) continue;
+      jobs.push(avatarDataUrlForUrl(annotation.icon).then(url => { annotation.icon = url || annotation.icon; }));
+    }
+  }
+  return jobs.length ? Promise.all(jobs).then(() => items) : Promise.resolve(items);
 }
 
 function userId(user) {
@@ -1037,17 +1079,49 @@ function nextCursor(page) {
 function signature() {
   return [
     feedKind(),
+    stringValue(typeof following_doc_id === "undefined" ? "" : following_doc_id),
+    stringValue(typeof for_you_doc_id === "undefined" ? "" : for_you_doc_id),
     stringValue(typeof query_doc_id === "undefined" ? "" : query_doc_id),
     stringValue(typeof include_reposts === "undefined" ? "on" : include_reposts),
+    stringValue(typeof reposts_followed_only === "undefined" ? "off" : reposts_followed_only),
     stringValue(typeof include_quotes === "undefined" ? "on" : include_quotes),
     stringValue(typeof include_replies === "undefined" ? "off" : include_replies),
     stringValue(typeof show_metrics === "undefined" ? "on" : show_metrics),
-    stringValue(typeof following_account_cap === "undefined" ? String(DEFAULT_FOLLOWING_CAP) : following_account_cap)
+    stringValue(typeof following_account_cap === "undefined" ? String(DEFAULT_FOLLOWING_CAP) : following_account_cap),
+    stringValue(typeof posts_per_account === "undefined" ? String(DEFAULT_POSTS_PER_ACCOUNT) : posts_per_account)
   ].join("|");
+}
+
+function rememberFollowingIds(users) {
+  followingIdSet = {};
+  for (const entry of users || []) {
+    const id = userId(entry);
+    if (id) followingIdSet[id] = true;
+  }
+}
+
+function prepareFollowingFilter(auth) {
+  if (feedKind() !== "following" || !repostsFollowedOnly()) {
+    followingIdSet = null;
+    return Promise.resolve();
+  }
+  return currentUser(auth).then(self => {
+    const selfId = userId(self);
+    const poolSize = Math.max(followingAccountCap() * 3, followingAccountCap());
+    return followingUsers(auth, selfId, poolSize).then(users => {
+      rememberFollowingIds(users);
+    });
+  });
 }
 
 function shouldInclude(post) {
   if (isRepost(post) && include_reposts !== "on") return false;
+  if (isRepost(post) && repostsFollowedOnly()) {
+    const original = nestedPost(post, ["repostedPost", "reposted_post", "repost"]);
+    const originalUser = original ? userForPost(original) : {};
+    const originalId = userId(originalUser);
+    if (followingIdSet && originalId && !followingIdSet[originalId]) return false;
+  }
   if (isQuote(post) && include_quotes === "off") return false;
   if (isReply(post) && include_replies !== "on") return false;
   return true;
@@ -1080,10 +1154,10 @@ function followingUsers(auth, selfId, maxCount) {
 }
 
 function userThreads(auth, id) {
-  return restGet(auth, `/api/v1/text_feed/${encodeURIComponent(id)}/profile/`, `count=${POSTS_PER_FOLLOWING}`);
+  return restGet(auth, `/api/v1/text_feed/${encodeURIComponent(id)}/profile/`, `count=${postsPerAccount()}`);
 }
 
-function mapPool(items, concurrency, worker) {
+function mapPool(items, concurrency, worker, gapMs) {
   const results = new Array(items.length);
   let nextIndex = 0;
   let failures = 0;
@@ -1091,7 +1165,8 @@ function mapPool(items, concurrency, worker) {
     if (nextIndex >= items.length) return Promise.resolve();
     const index = nextIndex;
     nextIndex += 1;
-    return Promise.resolve()
+    const start = gapMs ? delay(gapMs) : Promise.resolve();
+    return start
       .then(() => worker(items[index], index))
       .then(value => { results[index] = value; })
       .catch(error => {
@@ -1104,17 +1179,24 @@ function mapPool(items, concurrency, worker) {
   const runners = [];
   const count = Math.min(concurrency, Math.max(items.length, 1));
   for (let i = 0; i < count; i += 1) runners.push(run());
-  return Promise.all(runners).then(() => ({ results: results.filter(Boolean), failures }));
+  return Promise.all(runners).then(() => ({ results: results.filter(Boolean), failures, attempted: items.length }));
 }
 
 function userThreadsWithRetry(auth, id) {
   return userThreads(auth, id).catch(error => userThreads(auth, id).catch(() => Promise.reject(error)));
 }
 
+function timelinePaginationSource() {
+  return feedKind() === "for_you" ? "text_post_feed_threads" : "text_post_feed_following";
+}
+
 function requestTimelinePage(auth, cursor) {
-  const params = ["pagination_source=text_post_feed_threads", "count=25"];
-  if (cursor) params.push(`max_id=${encodeURIComponent(cursor)}`);
-  return restGet(auth, "/api/v1/feed/text_post_app_timeline/", params.join("&"));
+  const parts = [`pagination_source=${timelinePaginationSource()}`, "count=25"];
+  if (cursor) parts.push(`max_id=${encodeURIComponent(cursor)}`);
+  const body = parts.join("&");
+  return restPost(auth, "/api/v1/feed/text_post_app_timeline/", body).catch(() =>
+    restGet(auth, "/api/v1/feed/text_post_app_timeline/", body)
+  );
 }
 
 function collectCookieTimelinePages(auth, limit) {
@@ -1150,11 +1232,16 @@ function collectFollowingPages(auth, modeState) {
         unique.push(target);
       }
       // ponytail: capped parallel Following merge; raise following_account_cap if Loom timeout budget grows
-      return mapPool(unique, FOLLOWING_CONCURRENCY, target => userThreadsWithRetry(auth, target.id)).then(({ results, failures }) => ({
-        pages: results,
-        followingOffset: pool.length ? (offset + cap) % pool.length : 0,
-        failures
-      }));
+      return mapPool(unique, FOLLOWING_CONCURRENCY, target => userThreadsWithRetry(auth, target.id), PROFILE_FETCH_GAP_MS).then(({ results, failures, attempted }) => {
+        rememberFollowingIds(users);
+        return {
+          pages: results,
+          followingOffset: pool.length ? (offset + cap) % pool.length : 0,
+          failures,
+          attempted,
+          usedProfileMerge: true
+        };
+      });
     });
   });
 }
@@ -1174,14 +1261,35 @@ function collectGraphqlPages(auth, limit) {
 
 function collectPages(auth, limit, modeState) {
   if (feedKind() === "for_you" || (feedKind() === "following" && auth.docId)) {
-    return collectGraphqlPages(auth, limit).then(pages => ({ pages, followingOffset: modeState.followingOffset || 0 }));
+    return collectGraphqlPages(auth, limit).then(pages => ({
+      pages,
+      followingOffset: modeState.followingOffset || 0,
+      failures: 0,
+      attempted: 0,
+      usedProfileMerge: false
+    }));
   }
   return collectCookieTimelinePages(auth, limit).then(pages => {
     if (flattenPage(pages).length) {
-      return { pages, followingOffset: modeState.followingOffset || 0 };
+      return { pages, followingOffset: modeState.followingOffset || 0, failures: 0, attempted: 0, usedProfileMerge: false };
     }
     return collectFollowingPages(auth, modeState);
   }).catch(() => collectFollowingPages(auth, modeState));
+}
+
+function pageLimitForMode(modeState) {
+  return modeState.lastSeenAt ? 1 : MAX_BACKFILL_PAGES;
+}
+
+function warnThinFeed(result, itemCount) {
+  const failures = Number(result.failures || 0);
+  const attempted = Number(result.attempted || 0);
+  const thin = itemCount < 2 || (attempted > 0 && failures >= Math.max(1, Math.ceil(attempted / 2)));
+  if (!thin || typeof raiseCondition !== "function") return;
+  const parts = [`Loaded ${itemCount} new post${itemCount === 1 ? "" : "s"}.`];
+  if (failures > 0) parts.push(`${failures} of ${attempted || failures} account fetches failed.`);
+  if (result.usedProfileMerge) parts.push("Try a Following-tab doc_id, lower Following Account Cap, or refresh cookies.");
+  raiseCondition("warning", "Threads feed partially loaded", parts.join(" "));
 }
 
 function handleError(error) {
@@ -1220,8 +1328,8 @@ function load() {
   }
   const knownIds = {};
   for (const id of modeState.ids || []) knownIds[id] = true;
-  const pageLimit = feedKind() === "for_you" ? (modeState.lastSeenAt ? 1 : MAX_BACKFILL_PAGES) : 1;
-  collectPages(auth, pageLimit, modeState).then(result => {
+  const pageLimit = pageLimitForMode(modeState);
+  prepareFollowingFilter(auth).then(() => collectPages(auth, pageLimit, modeState)).then(result => {
     const pages = result.pages || [];
     const items = [];
     const seen = {};
@@ -1245,9 +1353,10 @@ function load() {
     const retained = ids.concat((modeState.ids || []).filter(id => !seen[id])).slice(0, MAX_STORED_IDS);
     const modePartial = { lastSeenAt: newest, ids: retained };
     if (typeof result.followingOffset === "number") modePartial.followingOffset = result.followingOffset;
-    return embedItemAvatars(items).then(() => {
+    return embedItemAvatars(items).then(() => embedAnnotationAvatars(items)).then(() => {
       writeModeState(feedSignature, modePartial);
       processResults(items, true);
+      warnThinFeed(result, items.length);
     });
   }).catch(handleError);
 }

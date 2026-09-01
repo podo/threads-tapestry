@@ -12,12 +12,13 @@ Cookie-authenticated Threads home connector. Default feed is **Following**
    (derived from sessionid when blank). **mid** / **ig_did** are optional.
 4. Leave **Feed** on `following` for cookie-only use. The connector tries the
    native timeline first, then merges recent posts from people you follow. If
-   the feed still looks thin, raise **Following Account Cap** (20 or 40) and/or
-   capture a **Following tab** `/api/graphql` `doc_id` from DevTools → Network
-   while the Following tab is open (same optional field as For You).
-5. Optional: **Show Metrics**, **Following Account Cap**, **Include Reposts**
-   (off hides reposts from non-followed originals), and **Authorization Bearer**
-   (writes only — leave blank unless cookie like/save fails).
+   the feed still looks thin, raise **Following Account Cap** (20 or 40),
+   capture a **Following doc_id** from DevTools → Network while the Following
+   tab is open, or enable **Reposts From Followed Only** to hide reposts of
+   non-followed accounts.
+5. Optional: **For You doc_id**, **Posts Per Account**, **Show Metrics**,
+   **Include Reposts**, and **Authorization Bearer** (writes only — leave blank
+   unless cookie like/save fails).
 6. Save, Verify, then Load in Tapestry Loom.
 
 Treat cookie values as account credentials. Do not share them or commit them.
